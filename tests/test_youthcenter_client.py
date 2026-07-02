@@ -67,7 +67,7 @@ class YouthCenterClientTest(unittest.TestCase):
     @patch("app.youthcenter_client.requests.get")
     def test_fetch_policies_redacts_key_from_request_errors(self, mock_get) -> None:
         mock_get.side_effect = requests.RequestException(
-            "failed for https://api.example.com?apiKeyNm=real-secret&pageNum=1"
+            "failed with real-secret for https://api.example.com?apiKeyNm=real-secret&pageNum=1"
         )
 
         client = YouthCenterClient(

@@ -18,11 +18,11 @@ from app.natural_language_parser import parse_natural_language_input
 from app.policy_normalizer import normalize_youthcenter_response
 from app.retriever import load_policies, retrieve_policies
 from app.schemas import EligibilityResult, Policy, UserIntent, UserProfile
+from app.sensitive import redact_sensitive_text
 from app.slot_questions import label_for_field, question_for_field
 from app.youthcenter_client import (
     YouthCenterClient,
     load_youthcenter_config,
-    redact_sensitive_text,
 )
 
 

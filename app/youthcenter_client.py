@@ -1,29 +1,19 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 
 import requests
 from dotenv import load_dotenv
 
+from app.sensitive import redact_sensitive_text
+
 
 DEFAULT_API_KEY_PARAM = "apiKeyNm"
-REDACTED_SECRET = "[REDACTED]"
-SENSITIVE_PARAM_PATTERN = re.compile(
-    r"(?i)((?:apiKeyNm|apiKey|api_key|serviceKey|serviceKeyNm)\s*[=:]\s*)[^&\s,'\")]+"
-)
 
 
 class YouthCenterAPIError(RuntimeError):
     """Raised when the external 온통청년 API request fails safely."""
-
-
-def redact_sensitive_text(text: object, api_key: str | None = None) -> str:
-    redacted = str(text)
-    if api_key:
-        redacted = redacted.replace(api_key, REDACTED_SECRET)
-    return SENSITIVE_PARAM_PATTERN.sub(rf"\1{REDACTED_SECRET}", redacted)
 
 
 @dataclass(frozen=True)
@@ -101,12 +91,12 @@ class YouthCenterClient:
                 status_code = response.status_code
             if status_code is None:
                 status_code = "unknown"
-            safe_error = redact_sensitive_text(error, self.api_key)
+            safe_error = redact_sensitive_text(error, extra_values=[self.api_key])
             raise YouthCenterAPIError(
                 f"온통청년 API 응답 오류가 발생했습니다. HTTP 상태: {status_code}. {safe_error}"
             ) from None
         except requests.RequestException as error:
-            safe_error = redact_sensitive_text(error, self.api_key)
+            safe_error = redact_sensitive_text(error, extra_values=[self.api_key])
             raise YouthCenterAPIError(f"온통청년 API 요청에 실패했습니다: {safe_error}") from None
 
         return response.text

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from app.natural_language_parser import _merge_profile, parse_natural_language_input
 from app.schemas import IntentCategory, UserProfile
@@ -38,6 +39,16 @@ class NaturalLanguageParserTest(unittest.TestCase):
         )
 
         self.assertEqual(merged.region, "경기도 의정부")
+
+    @patch("app.llm_parser.parse_natural_language_input_with_llm")
+    def test_llm_fallback_warning_redacts_secret_values(self, mock_parse_with_llm) -> None:
+        mock_parse_with_llm.side_effect = RuntimeError("OPENAI_API_KEY=sk-secret")
+
+        parsed = parse_natural_language_input("26살 의정부 구직 중", use_llm=True)
+
+        self.assertIsNotNone(parsed.warning)
+        self.assertNotIn("sk-secret", parsed.warning or "")
+        self.assertIn("[REDACTED]", parsed.warning or "")
 
 
 if __name__ == "__main__":

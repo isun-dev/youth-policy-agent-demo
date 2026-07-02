@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 
 from app.input_parser import EMPLOYMENT_STATUS_ALIASES
+from app.sensitive import redact_sensitive_text
 from app.schemas import IntentCategory, UserIntent, UserProfile
 
 
@@ -131,7 +132,7 @@ def parse_natural_language_input(
         return ParsedNaturalLanguageInput(
             profile=rule_based.profile,
             intent=rule_based.intent,
-            warning=f"LLM 해석을 사용하지 못해 규칙 기반 해석으로 진행합니다: {error}",
+            warning=f"LLM 해석을 사용하지 못해 규칙 기반 해석으로 진행합니다: {redact_sensitive_text(error)}",
         )
 
     return ParsedNaturalLanguageInput(
