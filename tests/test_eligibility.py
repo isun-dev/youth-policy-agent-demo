@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.eligibility import check_eligibility
 from app.retriever import load_policies
-from app.schemas import EligibilityStatus, Policy, UserProfile
+from app.schemas import Condition, ConditionStatus, EligibilityStatus, Policy, UserProfile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +92,41 @@ class EligibilityTest(unittest.TestCase):
         result = check_eligibility(profile, policy)
 
         self.assertIn("국민취업지원제도는 최근 취업 이력 조건을 충족해야 합니다.", result.reasons)
+
+    def test_condition_checks_show_policy_as_review_table(self) -> None:
+        profile = UserProfile(age=26, region="경기도", employment_status="job_seeker")
+
+        result = check_eligibility(profile, self.policies["gyeonggi_interview_support"])
+
+        checks_by_field = {check.field: check for check in result.condition_checks}
+        self.assertEqual(checks_by_field["age"].status, ConditionStatus.MATCHED)
+        self.assertEqual(checks_by_field["region"].status, ConditionStatus.MATCHED)
+        self.assertEqual(checks_by_field["employment_status"].status, ConditionStatus.MATCHED)
+        self.assertEqual(checks_by_field["interview_experience"].status, ConditionStatus.MISSING)
+        self.assertEqual(checks_by_field["interview_experience"].label, "면접 참여 이력")
+
+    def test_explicit_condition_question_and_source_text_are_preserved(self) -> None:
+        policy = Policy(
+            id="income_policy",
+            name="소득 확인 정책",
+            region=["전국"],
+            conditions=[
+                Condition(
+                    field="income_level",
+                    label="소득 기준",
+                    question="가구 소득이 기준중위소득 120% 이하인가요?",
+                    source_text="기준중위소득 120% 이하",
+                )
+            ],
+        )
+        profile = UserProfile(age=26, region="경기도", employment_status="job_seeker", extra={})
+
+        result = check_eligibility(profile, policy)
+
+        self.assertEqual(result.status, EligibilityStatus.NEED_MORE_INFO)
+        checks_by_field = {check.field: check for check in result.condition_checks}
+        self.assertEqual(checks_by_field["income_level"].question, "가구 소득이 기준중위소득 120% 이하인가요?")
+        self.assertEqual(checks_by_field["income_level"].source_text, "기준중위소득 120% 이하")
 
 
 if __name__ == "__main__":

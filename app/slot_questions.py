@@ -63,6 +63,67 @@ FIELD_LABELS = {
 }
 
 
+FIELD_GUIDES = {
+    "income_level": (
+        "정확한 소득 금액을 입력하지 않아도 됩니다. 정책 상세 페이지나 공식 신청 화면에서 "
+        "가구원 수와 유형별 소득 기준을 확인한 뒤 해당 여부만 선택하세요."
+    ),
+    "household_income": (
+        "가구원 수에 따라 기준이 달라질 수 있습니다. 금액을 직접 입력하지 말고 공식 기준표 확인 후 "
+        "해당 여부만 선택하세요."
+    ),
+    "parent_household_income": (
+        "부모님 소득 금액을 이 화면에 입력하지 않습니다. 공식 기준을 확인하기 어렵다면 모름을 선택하세요."
+    ),
+    "assets": (
+        "재산 기준은 정책 유형과 고시 기준에 따라 달라질 수 있습니다. 상세 금액을 입력하지 말고 "
+        "공식 기준 확인 후 해당 여부만 선택하세요."
+    ),
+    "work_income": (
+        "정확한 소득액은 저장하지 않습니다. 근로소득 또는 사업소득 요건에 해당하는지만 선택하세요."
+    ),
+    "employment_insurance": (
+        "고용보험 가입 여부는 개인정보성 정보입니다. 이 화면에는 가입 여부만 임시로 반영하고 "
+        "증빙자료나 번호는 입력하지 않습니다."
+    ),
+}
+
+
+POLICY_GUIDE_OVERRIDES = [
+    (
+        ("국민취업지원제도",),
+        {
+            "income_level": (
+                "국민취업지원제도는 유형과 가구원 수에 따라 소득 기준이 달라집니다. "
+                "정확한 소득액을 입력하지 말고, 공식 안내 또는 신청 화면에서 기준을 확인한 뒤 "
+                "해당 여부만 선택하세요."
+            ),
+            "assets": (
+                "국민취업지원제도 재산 기준은 유형별로 다를 수 있습니다. 이 화면에는 재산 금액을 "
+                "입력하지 않고, 공식 기준 확인 후 해당 여부만 선택합니다."
+            ),
+            "recent_employment_history": (
+                "고용보험 또는 최근 취업 이력은 개인 이력 정보입니다. 세부 사업장명이나 번호를 "
+                "입력하지 말고 해당 여부만 선택하세요."
+            ),
+        },
+    ),
+    (
+        ("월세",),
+        {
+            "income_level": (
+                "월세 지원의 소득 기준은 청년 본인 가구와 원가구 기준이 함께 적용될 수 있습니다. "
+                "정확한 금액 입력 대신 공식 기준 확인 후 해당 여부만 선택하세요."
+            ),
+            "parent_household_income": (
+                "부모님 가구 소득은 민감하게 느껴질 수 있는 개인정보성 정보입니다. "
+                "이 화면에는 금액을 입력하지 않고 해당 여부만 선택합니다."
+            ),
+        },
+    ),
+]
+
+
 POLICY_QUESTION_OVERRIDES = [
     (
         ("전세보증금", "보증료"),
@@ -109,6 +170,26 @@ def question_for_field(field: str, policy_name: str | None = None) -> str:
             if all(keyword in policy_name for keyword in keywords) and field in questions:
                 return questions[field]
     return FIELD_QUESTIONS.get(field, f"{field} 조건에 해당하나요?")
+
+
+def question_for_condition(condition: object, policy_name: str | None = None) -> str:
+    question = getattr(condition, "question", None)
+    if question:
+        return question
+
+    source_text = getattr(condition, "source_text", "")
+    if source_text:
+        return f"'{source_text}' 조건에 해당하나요?"
+
+    return question_for_field(getattr(condition, "field", ""), policy_name=policy_name)
+
+
+def guide_for_field(field: str, policy_name: str | None = None) -> str:
+    if policy_name:
+        for keywords, guides in POLICY_GUIDE_OVERRIDES:
+            if all(keyword in policy_name for keyword in keywords) and field in guides:
+                return guides[field]
+    return FIELD_GUIDES.get(field, "")
 
 
 def questions_for_fields(fields: list[str], policy_name: str | None = None) -> list[str]:

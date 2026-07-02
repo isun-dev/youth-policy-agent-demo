@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from app.slot_questions import question_for_field, questions_for_fields
+from app.schemas import Condition
+from app.slot_questions import (
+    guide_for_field,
+    question_for_condition,
+    question_for_field,
+    questions_for_fields,
+)
 
 
 class SlotQuestionsTest(unittest.TestCase):
@@ -62,6 +68,38 @@ class SlotQuestionsTest(unittest.TestCase):
             question_for_field("interview_experience", policy_name="경기도 청년면접수당"),
             "최근 취업 면접에 실제로 참여했고 증빙자료가 있나요?",
         )
+
+    def test_condition_question_prefers_explicit_question(self) -> None:
+        condition = Condition(
+            field="income_level",
+            question="가구 소득이 기준중위소득 120% 이하인가요?",
+            source_text="기준중위소득 120% 이하",
+        )
+
+        self.assertEqual(
+            question_for_condition(condition),
+            "가구 소득이 기준중위소득 120% 이하인가요?",
+        )
+
+    def test_condition_question_uses_source_text_when_no_question_exists(self) -> None:
+        condition = Condition(field="income_level", source_text="기준중위소득 120% 이하")
+
+        self.assertEqual(
+            question_for_condition(condition),
+            "'기준중위소득 120% 이하' 조건에 해당하나요?",
+        )
+
+    def test_guide_for_income_avoids_collecting_exact_amounts(self) -> None:
+        guide = guide_for_field("income_level")
+
+        self.assertIn("정확한 소득 금액을 입력하지 않아도 됩니다", guide)
+        self.assertIn("해당 여부만 선택", guide)
+
+    def test_policy_specific_guide_explains_kua_income_basis(self) -> None:
+        guide = guide_for_field("income_level", policy_name="국민취업지원제도")
+
+        self.assertIn("유형과 가구원 수", guide)
+        self.assertIn("정확한 소득액을 입력하지 말고", guide)
 
 
 if __name__ == "__main__":

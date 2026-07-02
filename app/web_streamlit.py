@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import hmac
+from html import escape
 import os
 import sys
 from pathlib import Path
@@ -17,9 +18,16 @@ from app.input_parser import normalize_employment_status
 from app.natural_language_parser import parse_natural_language_input
 from app.policy_normalizer import normalize_youthcenter_response
 from app.retriever import load_policies, retrieve_policies
-from app.schemas import EligibilityResult, Policy, UserIntent, UserProfile
+from app.schemas import (
+    ConditionCheck,
+    ConditionStatus,
+    EligibilityResult,
+    Policy,
+    UserIntent,
+    UserProfile,
+)
 from app.sensitive import redact_sensitive_text
-from app.slot_questions import label_for_field, question_for_field
+from app.slot_questions import guide_for_field, label_for_field, question_for_field
 from app.youthcenter_client import (
     YouthCenterClient,
     load_youthcenter_config,
@@ -41,15 +49,266 @@ EMPLOYMENT_STATUS_LABELS = {
     "unemployed": "미취업",
     "employed": "재직 중",
 }
+CONDITION_STATUS_LABELS = {
+    ConditionStatus.MATCHED: "충족",
+    ConditionStatus.MISSING: "추가 확인 필요",
+    ConditionStatus.FAILED: "어려움",
+}
+
+
+def _inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .policy-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 14px;
+        }
+        .policy-title {
+            font-size: 1.05rem;
+            font-weight: 750;
+            line-height: 1.35;
+            color: #1f2937;
+        }
+        .policy-meta {
+            margin-top: 4px;
+            font-size: 0.86rem;
+            color: #6b7280;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 92px;
+            padding: 7px 11px;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 750;
+            white-space: nowrap;
+        }
+        .status-eligible_likely {
+            color: #075985;
+            background: #e0f2fe;
+            border: 1px solid #7dd3fc;
+        }
+        .status-need_more_info {
+            color: #854d0e;
+            background: #fef3c7;
+            border: 1px solid #facc15;
+        }
+        .status-not_eligible_likely {
+            color: #991b1b;
+            background: #fee2e2;
+            border: 1px solid #fca5a5;
+        }
+        .section-label {
+            margin: 4px 0 8px;
+            font-size: 0.9rem;
+            font-weight: 750;
+            color: #374151;
+        }
+        .condition-block {
+            margin: 8px 0 14px;
+        }
+        .condition-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .condition-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px 12px;
+            align-items: center;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-left-width: 4px;
+            border-radius: 8px;
+            background: #ffffff;
+        }
+        .condition-main {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 9px;
+        }
+        .condition-label {
+            color: #111827;
+            font-size: 0.92rem;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+        .condition-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex: 0 0 8px;
+        }
+        .condition-matched {
+            border-left-color: #0ea5e9;
+            background: #f8fafc;
+        }
+        .condition-missing {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        .condition-failed {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+        .condition-matched .condition-dot {
+            background: #0ea5e9;
+        }
+        .condition-missing .condition-dot {
+            background: #f59e0b;
+        }
+        .condition-failed .condition-dot {
+            background: #ef4444;
+        }
+        .condition-pill {
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 0.76rem;
+            font-weight: 750;
+            white-space: nowrap;
+        }
+        .condition-pill-matched {
+            color: #075985;
+            background: #e0f2fe;
+        }
+        .condition-pill-missing {
+            color: #854d0e;
+            background: #fde68a;
+        }
+        .condition-pill-failed {
+            color: #991b1b;
+            background: #fecaca;
+        }
+        .condition-source {
+            grid-column: 1 / -1;
+            margin-left: 17px;
+            color: #6b7280;
+            font-size: 0.78rem;
+            line-height: 1.35;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin: 10px 0 12px;
+        }
+        .summary-item {
+            padding: 9px 10px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            background: #ffffff;
+            min-width: 0;
+        }
+        .summary-label {
+            margin-bottom: 4px;
+            color: #6b7280;
+            font-size: 0.75rem;
+            font-weight: 750;
+        }
+        .summary-value {
+            color: #111827;
+            font-size: 0.86rem;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+        .reason-box {
+            margin: 10px 0 2px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #fecaca;
+            background: #fff7f7;
+            color: #7f1d1d;
+            font-size: 0.9rem;
+            line-height: 1.45;
+        }
+        .privacy-note {
+            margin: 4px 0 14px;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1e3a8a;
+            font-size: 0.86rem;
+            line-height: 1.5;
+        }
+        .question-guide {
+            margin: -4px 0 8px;
+            padding: 9px 10px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            color: #4b5563;
+            font-size: 0.84rem;
+            line-height: 1.45;
+        }
+        .refreshed-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 2px 0 10px;
+        }
+        .demo-notice {
+            margin: 12px 0 18px;
+            padding: 13px 14px;
+            border: 1px solid #d1d5db;
+            border-left: 4px solid #2563eb;
+            border-radius: 8px;
+            background: #f8fafc;
+        }
+        .demo-notice-title {
+            margin-bottom: 6px;
+            color: #1f2937;
+            font-size: 0.95rem;
+            font-weight: 800;
+        }
+        .demo-notice-body {
+            color: #4b5563;
+            font-size: 0.87rem;
+            line-height: 1.5;
+        }
+        .demo-notice-body strong {
+            color: #1d4ed8;
+        }
+        @media (max-width: 760px) {
+            .policy-head,
+            .refreshed-head {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+            .condition-row {
+                grid-template-columns: 1fr;
+            }
+            .condition-pill {
+                width: fit-content;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
     st.set_page_config(page_title="경기도 청년 정책 지원 찾기", layout="wide")
+    _inject_styles()
     if not _render_password_gate():
         return
 
     st.title("경기도 청년 정책 지원 찾기")
     st.caption("경기도 거주 상황을 입력하면 받을 수 있는 지원을 찾아보고, 필요한 조건만 추가로 확인합니다.")
+    _render_demo_notice()
 
     _initialize_state()
     developer_ui_enabled = _developer_ui_enabled()
@@ -63,6 +322,23 @@ def main() -> None:
         return
 
     _render_user_page()
+
+
+def _render_demo_notice() -> None:
+    st.markdown(
+        """
+        <div class="demo-notice">
+            <div class="demo-notice-title">제한 접근 포트폴리오 데모</div>
+            <div class="demo-notice-body">
+                이 화면은 실제 운영 서비스가 아니라 자격 판정 Agent 흐름을 보여주는 데모입니다.
+                입력한 조건은 현재 세션의 판정에만 사용되며 DB에 저장하지 않습니다.
+                소득, 재산, 고용보험 등 개인정보성 조건은 <strong>해당 여부</strong> 중심으로만 확인하고,
+                실제 신청 가능 여부는 반드시 공식 기관과 신청 페이지에서 최종 확인해야 합니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _render_user_page() -> None:
@@ -332,18 +608,15 @@ def _render_profile_summary(profile: UserProfile) -> None:
 
 
 def _render_results(results: list[EligibilityResult]) -> None:
-    st.subheader("후보 정책")
+    st.subheader("정책별 자격 심사")
     for index, result in enumerate(_sort_results(results), start=1):
         policy = result.policy
         with st.container(border=True):
-            st.markdown(f"**{index}. {policy.name}**")
-            st.caption(f"판정: {STATUS_LABELS[result.status]}")
-            st.write(f"대상 지역: {_format_region(policy.region)}")
-            st.write(f"충족 조건: {_format_labels(result.matched_conditions)}")
-            st.write(f"부족한 정보: {_format_labels(result.missing_fields)}")
-            st.write(f"어려운 조건: {_format_labels(result.failed_conditions)}")
+            _render_policy_header(index, result)
+            _render_condition_checks(result.condition_checks)
+            _render_condition_summary(result)
             if result.reasons:
-                st.write(" ".join(result.reasons))
+                _render_reason_text(" ".join(result.reasons))
             if policy.benefit:
                 with st.expander("지원 내용"):
                     st.write(policy.benefit)
@@ -351,18 +624,110 @@ def _render_results(results: list[EligibilityResult]) -> None:
                 st.link_button("신청 링크", policy.apply_url)
 
 
+def _render_policy_header(index: int, result: EligibilityResult) -> None:
+    policy = result.policy
+    st.markdown(
+        f"""
+        <div class="policy-head">
+            <div>
+                <div class="policy-title">{index}. {_safe(policy.name)}</div>
+                <div class="policy-meta">대상 지역: {_safe(_format_region(policy.region))}</div>
+            </div>
+            <span class="status-badge status-{result.status.value}">
+                {_safe(STATUS_LABELS[result.status])}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_condition_checks(condition_checks: list[ConditionCheck]) -> None:
+    if not condition_checks:
+        return
+
+    rows = "\n".join(_condition_check_row(condition_check) for condition_check in condition_checks)
+    st.markdown(
+        f"""
+        <div class="condition-block">
+            <div class="section-label">조건별 심사</div>
+            <div class="condition-list">{rows}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _condition_check_row(condition_check: ConditionCheck) -> str:
+    source = ""
+    if condition_check.source_text:
+        source = f'<div class="condition-source">근거 조건: {_safe(condition_check.source_text)}</div>'
+
+    return f"""
+    <div class="condition-row condition-{condition_check.status.value}">
+        <div class="condition-main">
+            <span class="condition-dot"></span>
+            <span class="condition-label">{_safe(condition_check.label)}</span>
+        </div>
+        <span class="condition-pill condition-pill-{condition_check.status.value}">
+            {_safe(CONDITION_STATUS_LABELS[condition_check.status])}
+        </span>
+        {source}
+    </div>
+    """
+
+
+def _render_condition_summary(result: EligibilityResult) -> None:
+    st.markdown(
+        f"""
+        <div class="summary-grid">
+            <div class="summary-item summary-matched">
+                <div class="summary-label">충족</div>
+                <div class="summary-value">{_safe(_format_labels(result.matched_conditions))}</div>
+            </div>
+            <div class="summary-item summary-missing">
+                <div class="summary-label">추가 확인</div>
+                <div class="summary-value">{_safe(_format_labels(result.missing_fields))}</div>
+            </div>
+            <div class="summary-item summary-failed">
+                <div class="summary-label">어려움</div>
+                <div class="summary-value">{_safe(_format_labels(result.failed_conditions))}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_reason_text(reason: str) -> None:
+    st.markdown(
+        f'<div class="reason-box">{_safe(reason)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _render_slot_filling(results: list[EligibilityResult], key_prefix: str) -> None:
     st.subheader("선택 정책 추가 확인")
+    last_answered_result = _last_answered_result(results)
+    if last_answered_result is not None:
+        _render_refreshed_result(last_answered_result, title="최근 재판정 결과")
+
     candidates = [result for result in _sort_results(results) if result.missing_fields]
     if not candidates:
         st.success("추가 확인이 필요한 후보 정책이 없습니다.")
         return
 
     policy_options = {result.policy.name: result.policy.id for result in candidates}
+    selected_index = _selected_policy_index(candidates)
+    selectbox_key = f"{key_prefix}:slot_policy_select"
+    option_names = list(policy_options.keys())
+    if st.session_state.get(selectbox_key) not in policy_options:
+        st.session_state.pop(selectbox_key, None)
     selected_name = st.selectbox(
         "자세히 확인할 정책",
-        list(policy_options.keys()),
-        key=f"{key_prefix}:slot_policy_select",
+        option_names,
+        key=selectbox_key,
+        index=selected_index,
     )
     selected_policy_id = policy_options[selected_name]
     selected_result = next(result for result in candidates if result.policy.id == selected_policy_id)
@@ -370,14 +735,21 @@ def _render_slot_filling(results: list[EligibilityResult], key_prefix: str) -> N
     st.session_state.selected_policy_id = selected_policy_id
     with st.form(f"{key_prefix}:slot_form"):
         st.write("각 조건이 본인에게 해당하는지 선택하세요. 확실하지 않으면 모름을 선택하세요.")
+        _render_privacy_note()
         answers = {}
         for field in selected_result.missing_fields:
+            question = question_for_field(field, policy_name=selected_result.policy.name)
+            guide = guide_for_field(field, policy_name=selected_result.policy.name)
+            st.markdown(f"**{question}**")
+            if guide:
+                _render_question_guide(guide)
             answers[field] = st.radio(
-                question_for_field(field, policy_name=selected_result.policy.name),
+                question,
                 list(ANSWER_OPTIONS.keys()),
                 key=f"{key_prefix}:{selected_policy_id}:{field}",
                 horizontal=True,
                 index=2,
+                label_visibility="collapsed",
             )
 
         submitted = st.form_submit_button("답변 반영 후 재판정", type="primary")
@@ -390,17 +762,24 @@ def _render_slot_filling(results: list[EligibilityResult], key_prefix: str) -> N
         st.session_state.last_answered_policy_id = selected_policy_id
         st.rerun()
 
-    if st.session_state.last_answered_policy_id == selected_policy_id:
-        refreshed_result = _find_result_by_policy_id(_current_results(), selected_policy_id)
-        if refreshed_result is not None:
-            st.divider()
-            st.markdown("**재판정 결과**")
-            st.write(f"판정: {STATUS_LABELS[refreshed_result.status]}")
-            st.write(f"충족 조건: {_format_labels(refreshed_result.matched_conditions)}")
-            st.write(f"부족한 정보: {_format_labels(refreshed_result.missing_fields)}")
-            st.write(f"어려운 조건: {_format_labels(refreshed_result.failed_conditions)}")
-            if refreshed_result.reasons:
-                st.write(" ".join(refreshed_result.reasons))
+
+def _render_privacy_note() -> None:
+    st.markdown(
+        """
+        <div class="privacy-note">
+            정확한 소득액, 재산액, 증빙자료 번호는 입력하지 않습니다.
+            공식 기준을 확인한 뒤 해당 여부만 선택하고, 확실하지 않으면 모름을 선택하세요.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_question_guide(guide: str) -> None:
+    st.markdown(
+        f'<div class="question-guide">{_safe(guide)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _find_result_by_policy_id(
@@ -411,6 +790,40 @@ def _find_result_by_policy_id(
         if result.policy.id == policy_id:
             return result
     return None
+
+
+def _last_answered_result(results: list[EligibilityResult]) -> EligibilityResult | None:
+    policy_id = st.session_state.get("last_answered_policy_id")
+    if not policy_id:
+        return None
+    return _find_result_by_policy_id(results, policy_id)
+
+
+def _selected_policy_index(candidates: list[EligibilityResult]) -> int:
+    selected_policy_id = st.session_state.get("selected_policy_id")
+    for index, result in enumerate(candidates):
+        if result.policy.id == selected_policy_id:
+            return index
+    return 0
+
+
+def _render_refreshed_result(result: EligibilityResult, title: str) -> None:
+    st.markdown(
+        f"""
+        <div class="refreshed-head">
+            <div class="section-label">{_safe(title)}</div>
+            <span class="status-badge status-{result.status.value}">
+                {_safe(STATUS_LABELS[result.status])}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    _render_condition_checks(result.condition_checks)
+    _render_condition_summary(result)
+    if result.reasons:
+        _render_reason_text(" ".join(result.reasons))
+    st.divider()
 
 
 def _sort_results(results: list[EligibilityResult]) -> list[EligibilityResult]:
@@ -426,6 +839,10 @@ def _format_labels(values: list[str]) -> str:
     if not values:
         return "없음"
     return ", ".join(label_for_field(value) for value in values)
+
+
+def _safe(value: object) -> str:
+    return escape(str(value), quote=True)
 
 
 def _format_region(values: list[str]) -> str:

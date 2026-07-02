@@ -35,6 +35,32 @@ class UserProfile(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
+class ConditionStatus(str, Enum):
+    MATCHED = "matched"
+    MISSING = "missing"
+    FAILED = "failed"
+
+
+class Condition(BaseModel):
+    field: str
+    operator: str = "required"
+    value: Any = None
+    label: str = ""
+    question: Optional[str] = None
+    source_text: str = ""
+    source_url: str = ""
+
+
+class ConditionCheck(BaseModel):
+    field: str
+    label: str
+    status: ConditionStatus
+    question: Optional[str] = None
+    reason: str = ""
+    source_text: str = ""
+    source_url: str = ""
+
+
 class Policy(BaseModel):
     id: str
     name: str
@@ -43,6 +69,7 @@ class Policy(BaseModel):
     age_max: Optional[int] = None
     employment_status: list[str] = Field(default_factory=list)
     required_fields: list[str] = Field(default_factory=list)
+    conditions: list[Condition] = Field(default_factory=list)
     description: str = ""
     benefit: str = ""
     apply_url: str = ""
@@ -56,4 +83,5 @@ class EligibilityResult(BaseModel):
     matched_conditions: list[str] = Field(default_factory=list)
     failed_conditions: list[str] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
+    condition_checks: list[ConditionCheck] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)

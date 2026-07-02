@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from app.schemas import EligibilityResult, EligibilityStatus, UserProfile
-from app.slot_questions import questions_for_fields
+from app.schemas import (
+    ConditionCheck,
+    ConditionStatus,
+    EligibilityResult,
+    EligibilityStatus,
+    UserProfile,
+)
+from app.slot_questions import label_for_field, questions_for_fields
 
 
 STATUS_LABELS = {
@@ -34,8 +40,16 @@ def generate_answer(profile: UserProfile, results: list[EligibilityResult]) -> s
             [
                 f"{index}. {policy.name}",
                 f"- 판정: {STATUS_LABELS[result.status]}",
+                "- 조건별 심사:",
+            ]
+        )
+        for condition_check in result.condition_checks:
+            lines.append(f"  - {condition_check.label}: {_condition_status_label(condition_check)}")
+
+        lines.extend(
+            [
                 f"- 충족 조건: {_format_list(result.matched_conditions)}",
-                f"- 부족한 정보: {_format_list(result.missing_fields)}",
+                f"- 부족한 정보: {_format_field_labels(result.missing_fields)}",
                 f"- 어려운 조건: {_format_list(result.failed_conditions)}",
             ]
         )
@@ -69,3 +83,16 @@ def _sort_key(result: EligibilityResult) -> int:
 
 def _format_list(values: list[str]) -> str:
     return ", ".join(values) if values else "없음"
+
+
+def _format_field_labels(values: list[str]) -> str:
+    return ", ".join(label_for_field(value) for value in values) if values else "없음"
+
+
+def _condition_status_label(condition_check: ConditionCheck) -> str:
+    labels = {
+        ConditionStatus.MATCHED: "충족",
+        ConditionStatus.MISSING: "추가 확인 필요",
+        ConditionStatus.FAILED: "어려움",
+    }
+    return labels[condition_check.status]
