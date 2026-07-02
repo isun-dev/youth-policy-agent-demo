@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <policies>
+    <policy>
+      <id>sample_youth_policy_001</id>
+      <name>샘플 청년 취업지원 정책</name>
+      <region>경기도</region>
+      <ageMin>19</ageMin>
+      <ageMax>34</ageMax>
+      <employmentStatus>job_seeker,unemployed</employmentStatus>
+      <requiredFields>income_level,recent_job_search_activity</requiredFields>
+      <description>청년 구직자의 취업 준비를 지원하는 샘플 정책입니다.</description>
+      <benefit>취업 프로그램 및 참여수당 지원</benefit>
+      <applyUrl>https://www.youthcenter.go.kr</applyUrl>
+      <sourceUrl>https://www.youthcenter.go.kr</sourceUrl>
+      <lastChecked>2026-06-22</lastChecked>
+    </policy>
+  </policies>
+</response>

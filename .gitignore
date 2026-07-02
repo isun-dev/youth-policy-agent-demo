@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+.pycache/
+*.pyc
+.DS_Store
+.idea/
+
+# Public demo repo should not publish private notes or idea documents.
+AGENTS.md
+docs/
+.streamlit/secrets.toml
