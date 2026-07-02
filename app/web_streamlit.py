@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import hmac
 import os
 import sys
@@ -146,8 +147,10 @@ def _render_user_search_form(form_key: str) -> None:
         show_data_source=False,
         show_llm_toggle=False,
         show_api_settings=False,
-        default_data_source="sample",
+        default_data_source=_default_user_data_source(),
         default_use_llm=True,
+        default_page_size=_default_user_api_page_size(),
+        default_pages=_default_user_api_pages(),
     )
 
 
@@ -159,6 +162,8 @@ def _render_search_form(
     show_api_settings: bool,
     default_data_source: str = "sample",
     default_use_llm: bool = False,
+    default_page_size: int = 20,
+    default_pages: int = 5,
 ) -> None:
     st.subheader(title)
     st.write("한 문장으로 먼저 적고, 부족한 값은 아래 입력값으로 보완합니다.")
@@ -184,12 +189,24 @@ def _render_search_form(
         region = col2.text_input("거주 지역", value="경기도 의정부", placeholder="예: 경기도 의정부")
         status_text = col3.text_input("현재 상태", value="백수", placeholder="예: 취준생, 백수, 재직 중")
 
-        page_size = 20
-        pages = 5
+        page_size = default_page_size
+        pages = default_pages
         if show_api_settings:
             with st.expander("API 가져오기 설정", expanded=False):
-                page_size = st.number_input("API 페이지당 정책 수", min_value=1, max_value=100, value=20, step=1)
-                pages = st.number_input("API 가져올 페이지 수", min_value=1, max_value=20, value=5, step=1)
+                page_size = st.number_input(
+                    "API 페이지당 정책 수",
+                    min_value=1,
+                    max_value=100,
+                    value=default_page_size,
+                    step=1,
+                )
+                pages = st.number_input(
+                    "API 가져올 페이지 수",
+                    min_value=1,
+                    max_value=20,
+                    value=default_pages,
+                    step=1,
+                )
 
         submitted = st.form_submit_button(
             "조건으로 찾아보기",
@@ -200,19 +217,32 @@ def _render_search_form(
     if not submitted:
         return
 
-    profile, intent, warning = _build_profile_from_inputs(
-        natural_text=natural_text,
-        use_llm=use_llm,
-        age=int(age),
-        region=region,
-        status_text=status_text,
-    )
-    try:
-        policies = _load_policies(data_source, page_size=int(page_size), pages=int(pages))
-    except Exception as error:  # noqa: BLE001 - UI should show external API/setup errors.
-        st.error(f"정책 데이터를 불러오지 못했습니다: {error}")
-    else:
+    with st.status("조건을 분석하고 정책을 확인하는 중입니다.", expanded=True) as status:
+        st.write("입력 문장에서 조건을 정리하고 있습니다.")
+        profile, intent, warning = _build_profile_from_inputs(
+            natural_text=natural_text,
+            use_llm=use_llm,
+            age=int(age),
+            region=region,
+            status_text=status_text,
+        )
+
+        st.write(_loading_source_message(data_source))
+        try:
+            policies = _load_policies(
+                data_source,
+                page_size=int(page_size),
+                pages=int(pages),
+                progress_callback=lambda message: st.write(message),
+            )
+        except Exception as error:  # noqa: BLE001 - UI should show external API/setup errors.
+            status.update(label="정책 데이터를 불러오지 못했습니다.", state="error", expanded=True)
+            st.error(f"정책 데이터를 불러오지 못했습니다: {error}")
+            return
+
+        st.write("후보 정책을 정리하고 있습니다.")
         _set_session(profile=profile, policies=policies, intent=intent, parse_warning=warning)
+        status.update(label="검색 준비가 완료되었습니다.", state="complete", expanded=False)
         st.rerun()
 
 
@@ -242,7 +272,12 @@ def _build_profile_from_inputs(
     return profile, parsed.intent, parsed.warning
 
 
-def _load_policies(data_source: str, page_size: int, pages: int) -> list[Policy]:
+def _load_policies(
+    data_source: str,
+    page_size: int,
+    pages: int,
+    progress_callback: Callable[[str], None] | None = None,
+) -> list[Policy]:
     if data_source == "sample":
         return load_policies(POLICY_PATH)
 
@@ -252,6 +287,8 @@ def _load_policies(data_source: str, page_size: int, pages: int) -> list[Policy]
     seen_policy_ids: set[str] = set()
 
     for page in range(1, pages + 1):
+        if progress_callback is not None:
+            progress_callback(f"온통청년 API에서 정책 데이터를 가져오는 중입니다. ({page}/{pages})")
         response_text = client.fetch_policies(page=page, page_size=page_size)
         for policy in normalize_youthcenter_response(response_text):
             if policy.id in seen_policy_ids:
@@ -260,6 +297,12 @@ def _load_policies(data_source: str, page_size: int, pages: int) -> list[Policy]
             policies.append(policy)
 
     return policies
+
+
+def _loading_source_message(data_source: str) -> str:
+    if data_source == "api":
+        return "온통청년 API에서 최신 정책 후보를 확인하고 있습니다."
+    return "샘플 정책 데이터에서 후보를 확인하고 있습니다."
 
 
 def _current_results() -> list[EligibilityResult]:
@@ -416,6 +459,29 @@ def _developer_ui_enabled() -> bool:
         "no",
         "off",
     }
+
+
+def _default_user_data_source() -> str:
+    configured_source = os.getenv("USER_DATA_SOURCE", "sample").strip().lower()
+    if configured_source in {"sample", "api"}:
+        return configured_source
+    return "sample"
+
+
+def _default_user_api_page_size() -> int:
+    return _integer_from_env("USER_API_PAGE_SIZE", default=20, minimum=1, maximum=100)
+
+
+def _default_user_api_pages() -> int:
+    return _integer_from_env("USER_API_PAGES", default=5, minimum=1, maximum=20)
+
+
+def _integer_from_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return min(max(value, minimum), maximum)
 
 
 def _render_password_gate() -> bool:
