@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 import requests
@@ -8,6 +9,21 @@ from dotenv import load_dotenv
 
 
 DEFAULT_API_KEY_PARAM = "apiKeyNm"
+REDACTED_SECRET = "[REDACTED]"
+SENSITIVE_PARAM_PATTERN = re.compile(
+    r"(?i)((?:apiKeyNm|apiKey|api_key|serviceKey|serviceKeyNm)\s*[=:]\s*)[^&\s,'\")]+"
+)
+
+
+class YouthCenterAPIError(RuntimeError):
+    """Raised when the external 온통청년 API request fails safely."""
+
+
+def redact_sensitive_text(text: object, api_key: str | None = None) -> str:
+    redacted = str(text)
+    if api_key:
+        redacted = redacted.replace(api_key, REDACTED_SECRET)
+    return SENSITIVE_PARAM_PATTERN.sub(rf"\1{REDACTED_SECRET}", redacted)
 
 
 @dataclass(frozen=True)
@@ -30,6 +46,11 @@ def load_youthcenter_config() -> YouthCenterConfig:
 
     if missing:
         raise ValueError(f".env에 {', '.join(missing)} 값을 설정해야 합니다.")
+    if "?" in base_url:
+        raise ValueError(
+            "YOUTHCENTER_API_BASE_URL에는 쿼리스트링을 넣지 말고 API 엔드포인트 URL만 설정해야 합니다. "
+            "예: https://www.youthcenter.go.kr/go/ythip/getPlcy"
+        )
 
     return YouthCenterConfig(
         api_key=api_key,
@@ -70,6 +91,22 @@ class YouthCenterClient:
         if extra_params:
             params.update(extra_params)
 
-        response = requests.get(self.base_url, params=params, timeout=10)
-        response.raise_for_status()
+        response: requests.Response | None = None
+        try:
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            status_code = getattr(error.response, "status_code", None)
+            if status_code is None and response is not None:
+                status_code = response.status_code
+            if status_code is None:
+                status_code = "unknown"
+            safe_error = redact_sensitive_text(error, self.api_key)
+            raise YouthCenterAPIError(
+                f"온통청년 API 응답 오류가 발생했습니다. HTTP 상태: {status_code}. {safe_error}"
+            ) from None
+        except requests.RequestException as error:
+            safe_error = redact_sensitive_text(error, self.api_key)
+            raise YouthCenterAPIError(f"온통청년 API 요청에 실패했습니다: {safe_error}") from None
+
         return response.text

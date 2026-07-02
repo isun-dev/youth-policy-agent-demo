@@ -19,7 +19,11 @@ from app.policy_normalizer import normalize_youthcenter_response
 from app.retriever import load_policies, retrieve_policies
 from app.schemas import EligibilityResult, Policy, UserIntent, UserProfile
 from app.slot_questions import label_for_field, question_for_field
-from app.youthcenter_client import YouthCenterClient, load_youthcenter_config
+from app.youthcenter_client import (
+    YouthCenterClient,
+    load_youthcenter_config,
+    redact_sensitive_text,
+)
 
 
 POLICY_PATH = PROJECT_ROOT / "data" / "policies.sample.json"
@@ -237,7 +241,9 @@ def _render_search_form(
             )
         except Exception as error:  # noqa: BLE001 - UI should show external API/setup errors.
             status.update(label="정책 데이터를 불러오지 못했습니다.", state="error", expanded=True)
-            st.error(f"정책 데이터를 불러오지 못했습니다: {error}")
+            st.error("정책 데이터를 불러오지 못했습니다. .env 설정 또는 온통청년 API 응답 상태를 확인해 주세요.")
+            if show_data_source:
+                st.caption(f"개발자 참고: {redact_sensitive_text(error)}")
             return
 
         st.write("후보 정책을 정리하고 있습니다.")
