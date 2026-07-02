@@ -8,11 +8,11 @@ from app.schemas import IntentCategory, UserProfile
 
 class NaturalLanguageParserTest(unittest.TestCase):
     def test_extracts_profile_and_employment_intent_from_sentence(self) -> None:
-        parsed = parse_natural_language_input("26살이고 의정부 사는 백수인데 구직지원금 있어?")
+        parsed = parse_natural_language_input("26살이고 의정부 사는 구직 중 청년인데 구직지원금 있어?")
 
         self.assertEqual(parsed.profile.age, 26)
         self.assertEqual(parsed.profile.region, "경기도 의정부")
-        self.assertEqual(parsed.profile.employment_status, "unemployed")
+        self.assertEqual(parsed.profile.employment_status, "job_seeker")
         self.assertEqual(parsed.intent.category, IntentCategory.EMPLOYMENT)
         self.assertEqual(parsed.intent.target_policy_keyword, "구직지원금")
 

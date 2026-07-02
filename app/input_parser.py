@@ -27,7 +27,7 @@ EMPLOYMENT_STATUS_ALIASES = {
 def build_profile_from_cli() -> UserProfile:
     age = _parse_age(input("나이를 입력하세요: ").strip())
     region = input("거주 지역을 입력하세요 (예: 경기도): ").strip() or None
-    status_text = input("현재 상태를 입력하세요 (예: 취준생, 백수, 재직 중): ").strip()
+    status_text = input("현재 상태를 입력하세요 (예: 구직 중, 취준생, 재직 중): ").strip()
 
     return UserProfile(
         age=age,

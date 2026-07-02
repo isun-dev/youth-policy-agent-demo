@@ -17,7 +17,7 @@ POLICY_PATH = PROJECT_ROOT / "data" / "policies.sample.json"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="청년 정책 자격 판정 CLI")
+    parser = argparse.ArgumentParser(description="경기도 청년 정책 지원 자격 판정 CLI")
     parser.add_argument(
         "--source",
         choices=["sample", "api"],
@@ -43,7 +43,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--text",
-        help="사용자 상황을 한 문장으로 입력합니다. 예: 26살이고 의정부 사는 백수인데 구직지원금 있어?",
+        help="사용자 상황을 한 문장으로 입력합니다. 예: 26살이고 의정부 사는 구직 중 청년인데 구직지원금 있어?",
     )
     parser.add_argument(
         "--use-llm",

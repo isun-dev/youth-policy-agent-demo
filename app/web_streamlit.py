@@ -40,12 +40,12 @@ EMPLOYMENT_STATUS_LABELS = {
 
 
 def main() -> None:
-    st.set_page_config(page_title="내게 맞는 청년지원 찾기", layout="wide")
+    st.set_page_config(page_title="경기도 청년 정책 지원 찾기", layout="wide")
     if not _render_password_gate():
         return
 
-    st.title("내게 맞는 청년지원 찾기")
-    st.caption("지금 상황을 입력하면 받을 수 있는 지원을 찾아보고, 필요한 조건만 추가로 확인합니다.")
+    st.title("경기도 청년 정책 지원 찾기")
+    st.caption("경기도 거주 상황을 입력하면 받을 수 있는 지원을 찾아보고, 필요한 조건만 추가로 확인합니다.")
 
     _initialize_state()
     developer_ui_enabled = _developer_ui_enabled()
@@ -177,7 +177,7 @@ def _render_search_form(
         natural_text = st.text_area(
             "한 문장 입력",
             value="",
-            placeholder="예: 26살이고 의정부 사는 백수인데 구직지원금 있어?",
+            placeholder="예: 26살이고 의정부 사는 구직 중 청년인데 구직지원금 있어?",
             height=110,
         )
         use_llm = default_use_llm
@@ -187,7 +187,7 @@ def _render_search_form(
         col1, col2, col3 = st.columns([0.7, 1.2, 1])
         age = col1.number_input("나이", min_value=0, max_value=120, value=26, step=1)
         region = col2.text_input("거주 지역", value="경기도 의정부", placeholder="예: 경기도 의정부")
-        status_text = col3.text_input("현재 상태", value="백수", placeholder="예: 취준생, 백수, 재직 중")
+        status_text = col3.text_input("현재 상태", value="구직 중", placeholder="예: 구직 중, 취준생, 재직 중")
 
         page_size = default_page_size
         pages = default_pages
@@ -492,7 +492,7 @@ def _render_password_gate() -> bool:
     if st.session_state.get("demo_authenticated") is True:
         return True
 
-    st.title("내게 맞는 청년지원 찾기")
+    st.title("경기도 청년 정책 지원 찾기")
     st.caption("데모 접근을 위해 비밀번호를 입력하세요.")
 
     with st.form("demo_password_form"):
