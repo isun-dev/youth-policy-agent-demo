@@ -5,7 +5,6 @@ from pathlib import Path
 
 from app.gyeonggi_client import GYEONGGI_JOB_ENDPOINTS, GyeonggiClient, load_gyeonggi_config
 from app.policy_detail_enricher import enrich_policies_with_detail_pages
-from app.policy_normalizer import normalize_gyeonggi_job_response, normalize_youthcenter_response
 from app.retriever import load_policies
 from app.schemas import Policy
 from app.youthcenter_client import YouthCenterClient, load_youthcenter_config
@@ -75,6 +74,8 @@ def load_youthcenter_api_policies(
     pages: int = 5,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[Policy]:
+    from app.policy_normalizer import normalize_youthcenter_response
+
     config = load_youthcenter_config()
     client = YouthCenterClient.from_config(config)
     policies: list[Policy] = []
@@ -100,6 +101,8 @@ def load_gyeonggi_api_policies(
     detail_limit: int = 10,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[Policy]:
+    from app.policy_normalizer import normalize_gyeonggi_job_response
+
     config = load_gyeonggi_config()
     client = GyeonggiClient.from_config(config)
     policies: list[Policy] = []
