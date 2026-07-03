@@ -7,7 +7,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
-from app.agent import run_agent, run_agent_from_gyeonggi_api, run_agent_from_youthcenter_api
+from app.agent import (
+    run_agent,
+    run_agent_from_combined_api,
+    run_agent_from_gyeonggi_api,
+    run_agent_from_youthcenter_api,
+)
 from app.input_parser import build_profile_from_cli
 from app.natural_language_parser import parse_natural_language_input
 from app.schemas import UserIntent, UserProfile
@@ -20,7 +25,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="경기도 청년 정책 지원 자격 판정 CLI")
     parser.add_argument(
         "--source",
-        choices=["sample", "api", "youthcenter", "gyeonggi"],
+        choices=["sample", "api", "youthcenter", "gyeonggi", "combined"],
         default="sample",
         help="정책 데이터 출처를 선택합니다. api는 youthcenter와 같습니다. 기본값은 sample입니다.",
     )
@@ -75,6 +80,16 @@ def main() -> None:
         )
     elif args.source == "gyeonggi":
         answer = run_agent_from_gyeonggi_api(
+            profile,
+            page_size=args.page_size,
+            pages=args.pages,
+            slot_fill=args.slot_fill,
+            intent=intent,
+            fetch_details=not args.skip_details,
+            detail_limit=args.detail_limit,
+        )
+    elif args.source == "combined":
+        answer = run_agent_from_combined_api(
             profile,
             page_size=args.page_size,
             pages=args.pages,

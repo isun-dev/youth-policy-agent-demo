@@ -16,11 +16,9 @@ sys.path.append(str(PROJECT_ROOT))
 
 from app.answer_generator import STATUS_LABELS
 from app.eligibility import check_all
-from app.gyeonggi_client import GYEONGGI_JOB_ENDPOINTS, GyeonggiClient, load_gyeonggi_config
 from app.input_parser import normalize_employment_status
 from app.natural_language_parser import parse_natural_language_input
-from app.policy_detail_enricher import enrich_policies_with_detail_pages
-from app.policy_normalizer import normalize_gyeonggi_job_response, normalize_youthcenter_response
+from app.policy_sources import load_policies_from_source
 from app.retriever import load_policies, retrieve_policies
 from app.schemas import (
     ConditionCheck,
@@ -32,10 +30,6 @@ from app.schemas import (
 )
 from app.sensitive import redact_sensitive_text
 from app.slot_questions import guide_for_field, label_for_field, question_for_field
-from app.youthcenter_client import (
-    YouthCenterClient,
-    load_youthcenter_config,
-)
 
 
 POLICY_PATH = PROJECT_ROOT / "data" / "policies.sample.json"
@@ -48,6 +42,7 @@ DATA_SOURCE_OPTIONS = {
     "샘플 데이터": "sample",
     "온통청년 API": "api",
     "경기도 잡아바 API": "gyeonggi",
+    "통합 API": "combined",
 }
 EMPLOYMENT_STATUS_LABELS = {
     "job_seeker": "구직 중",
@@ -613,62 +608,15 @@ def _load_policies(
 ) -> list[Policy]:
     if data_source == "sample":
         return load_policies(POLICY_PATH)
-    if data_source == "gyeonggi":
-        return _load_gyeonggi_policies(
-            page_size=page_size,
-            pages=pages,
-            detail_limit=detail_limit,
-            progress_callback=progress_callback,
-        )
-
-    config = load_youthcenter_config()
-    client = YouthCenterClient.from_config(config)
-    policies: list[Policy] = []
-    seen_policy_ids: set[str] = set()
-
-    for page in range(1, pages + 1):
-        if progress_callback is not None:
-            progress_callback(f"온통청년 API에서 정책 데이터를 가져오는 중입니다. ({page}/{pages})")
-        response_text = client.fetch_policies(page=page, page_size=page_size)
-        for policy in normalize_youthcenter_response(response_text):
-            if policy.id in seen_policy_ids:
-                continue
-            seen_policy_ids.add(policy.id)
-            policies.append(policy)
-
-    return policies
-
-
-def _load_gyeonggi_policies(
-    page_size: int,
-    pages: int,
-    detail_limit: int,
-    progress_callback: Callable[[str], None] | None = None,
-) -> list[Policy]:
-    config = load_gyeonggi_config()
-    client = GyeonggiClient.from_config(config)
-    policies: list[Policy] = []
-    seen_policy_ids: set[str] = set()
-
-    for endpoint in GYEONGGI_JOB_ENDPOINTS:
-        for page in range(1, pages + 1):
-            if progress_callback is not None:
-                progress_callback(f"경기도 잡아바 API에서 {endpoint} 데이터를 가져오는 중입니다. ({page}/{pages})")
-            response_text = client.fetch_endpoint(endpoint, page=page, page_size=page_size)
-            for policy in normalize_gyeonggi_job_response(response_text, endpoint=endpoint):
-                if policy.id in seen_policy_ids:
-                    continue
-                seen_policy_ids.add(policy.id)
-                policies.append(policy)
-
-    if _gyeonggi_fetch_details_enabled():
-        policies = enrich_policies_with_detail_pages(
-            policies,
-            detail_limit=detail_limit,
-            progress_callback=progress_callback,
-        )
-
-    return policies
+    return load_policies_from_source(
+        data_source,
+        sample_path=POLICY_PATH,
+        page_size=page_size,
+        pages=pages,
+        gyeonggi_fetch_details=_gyeonggi_fetch_details_enabled(),
+        gyeonggi_detail_limit=detail_limit,
+        progress_callback=progress_callback,
+    )
 
 
 def _loading_source_message(data_source: str) -> str:
@@ -676,6 +624,8 @@ def _loading_source_message(data_source: str) -> str:
         return "온통청년 API에서 최신 정책 후보를 확인하고 있습니다."
     if data_source == "gyeonggi":
         return "경기도 잡아바 API에서 일자리/교육/대외활동 후보를 확인하고 있습니다."
+    if data_source == "combined":
+        return "온통청년 API와 경기도 잡아바 API에서 후보를 함께 확인하고 있습니다."
     return "샘플 정책 데이터에서 후보를 확인하고 있습니다."
 
 
@@ -1057,8 +1007,14 @@ def _developer_ui_enabled() -> bool:
 
 def _default_user_data_source() -> str:
     configured_source = os.getenv("USER_DATA_SOURCE", "").strip().lower()
-    if configured_source in {"sample", "api", "gyeonggi"}:
+    if configured_source in {"sample", "api", "gyeonggi", "combined"}:
         return configured_source
+    if (
+        os.getenv("YOUTHCENTER_API_KEY", "").strip()
+        and os.getenv("YOUTHCENTER_API_BASE_URL", "").strip()
+        and os.getenv("GYEONGGI_API_KEY", "").strip()
+    ):
+        return "combined"
     if os.getenv("YOUTHCENTER_API_KEY", "").strip() and os.getenv("YOUTHCENTER_API_BASE_URL", "").strip():
         return "api"
     if os.getenv("GYEONGGI_API_KEY", "").strip():
