@@ -4,10 +4,12 @@ from collections.abc import Callable
 import hmac
 from html import escape
 import os
+import re
 import sys
 from pathlib import Path
 
 import streamlit as st
+from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
@@ -249,6 +251,38 @@ def _inject_styles() -> None:
             font-size: 0.84rem;
             line-height: 1.45;
         }
+        .condition-evidence {
+            margin: 4px 0 10px;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            color: #374151;
+            font-size: 0.83rem;
+            line-height: 1.5;
+        }
+        .condition-evidence-title {
+            margin-bottom: 6px;
+            color: #111827;
+            font-weight: 800;
+        }
+        .condition-evidence-text {
+            overflow-wrap: anywhere;
+        }
+        .condition-evidence-list {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .condition-evidence-list li {
+            margin: 3px 0;
+        }
+        .condition-evidence a {
+            display: inline-block;
+            margin-top: 7px;
+            color: #2563eb;
+            font-weight: 750;
+            text-decoration: underline;
+        }
         .refreshed-head {
             display: flex;
             align-items: center;
@@ -301,6 +335,7 @@ def _inject_styles() -> None:
 
 
 def main() -> None:
+    load_dotenv()
     st.set_page_config(page_title="경기도 청년 정책 지원 찾기", layout="wide")
     _inject_styles()
     if not _render_password_gate():
@@ -737,10 +772,12 @@ def _render_slot_filling(results: list[EligibilityResult], key_prefix: str) -> N
         st.write("각 조건이 본인에게 해당하는지 선택하세요. 확실하지 않으면 모름을 선택하세요.")
         _render_privacy_note()
         answers = {}
-        for field in selected_result.missing_fields:
-            question = question_for_field(field, policy_name=selected_result.policy.name)
+        for condition_check in _missing_condition_checks(selected_result):
+            field = condition_check.field
+            question = _slot_question_for_condition_check(condition_check, selected_result.policy.name)
             guide = guide_for_field(field, policy_name=selected_result.policy.name)
             st.markdown(f"**{question}**")
+            _render_condition_evidence(selected_result, condition_check)
             if guide:
                 _render_question_guide(guide)
             answers[field] = st.radio(
@@ -780,6 +817,83 @@ def _render_question_guide(guide: str) -> None:
         f'<div class="question-guide">{_safe(guide)}</div>',
         unsafe_allow_html=True,
     )
+
+
+def _render_condition_evidence(
+    result: EligibilityResult,
+    condition_check: ConditionCheck,
+) -> None:
+    source_text = condition_check.source_text or _fallback_policy_evidence(result.policy)
+    source_url = condition_check.source_url or result.policy.source_url or result.policy.apply_url
+    if not source_text:
+        source_text = "API 응답에서 이 조건의 세부 기준 문장을 찾지 못했습니다. 공식 상세 페이지에서 확인한 뒤 확실하지 않으면 모름을 선택하세요."
+
+    title = "판단 근거" if condition_check.source_text else "정책 원문 참고"
+    source_link = ""
+    if source_url:
+        source_link = f'<a href="{_safe(source_url)}" target="_blank" rel="noreferrer">출처 확인</a>'
+
+    st.markdown(
+        f"""
+        <div class="condition-evidence">
+            <div class="condition-evidence-title">{_safe(title)}</div>
+            <div class="condition-evidence-text">{_evidence_html(source_text)}</div>
+            {source_link}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _slot_question_for_condition_check(condition_check: ConditionCheck, policy_name: str) -> str:
+    fallback_question = question_for_field(condition_check.field, policy_name=policy_name)
+    if not condition_check.question:
+        return fallback_question
+    if len(condition_check.question) > 90:
+        return fallback_question
+    if condition_check.source_text and condition_check.source_text in condition_check.question:
+        return fallback_question
+    return condition_check.question
+
+
+def _evidence_html(source_text: str) -> str:
+    points = _split_evidence_points(source_text)
+    if len(points) <= 1:
+        return _safe(source_text)
+
+    items = "\n".join(f"<li>{_safe(point)}</li>" for point in points[:6])
+    remaining_count = len(points) - 6
+    if remaining_count > 0:
+        items += f"<li>{remaining_count}개 항목은 출처에서 추가 확인</li>"
+    return f'<ul class="condition-evidence-list">{items}</ul>'
+
+
+def _split_evidence_points(source_text: str) -> list[str]:
+    normalized = " ".join(source_text.split())
+    normalized = normalized.strip("'\" ")
+    normalized = normalized.replace(" - ", "\n")
+    parts = [
+        part.strip(" -·•")
+        for part in re.split(r"(?=[①②③④⑤⑥⑦⑧⑨⑩])|[\n;；]+", normalized)
+        if part.strip(" -·•")
+    ]
+    return parts
+
+
+def _missing_condition_checks(result: EligibilityResult) -> list[ConditionCheck]:
+    missing_fields = set(result.missing_fields)
+    return [
+        condition_check
+        for condition_check in result.condition_checks
+        if condition_check.status == ConditionStatus.MISSING and condition_check.field in missing_fields
+    ]
+
+
+def _fallback_policy_evidence(policy: Policy) -> str:
+    for text in policy.evidence_texts:
+        if text and text != policy.name:
+            return text
+    return policy.description or policy.benefit
 
 
 def _find_result_by_policy_id(
@@ -885,9 +999,11 @@ def _developer_ui_enabled() -> bool:
 
 
 def _default_user_data_source() -> str:
-    configured_source = os.getenv("USER_DATA_SOURCE", "sample").strip().lower()
+    configured_source = os.getenv("USER_DATA_SOURCE", "").strip().lower()
     if configured_source in {"sample", "api"}:
         return configured_source
+    if os.getenv("YOUTHCENTER_API_KEY", "").strip() and os.getenv("YOUTHCENTER_API_BASE_URL", "").strip():
+        return "api"
     return "sample"
 
 

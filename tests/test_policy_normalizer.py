@@ -125,6 +125,36 @@ class PolicyNormalizerTest(unittest.TestCase):
         self.assertIn("lease_deposit", policies[0].required_fields)
         self.assertIn("guarantee_insurance_status", policies[0].required_fields)
 
+    def test_builds_conditions_with_api_evidence_text(self) -> None:
+        policies = normalize_youthcenter_response(
+            """
+            {
+              "youthPolicyList": [
+                {
+                  "plcyNo": "P1",
+                  "plcyNm": "국민취업지원제도",
+                  "sprtTrgtCn": "기준중위소득 60% 이하이고 가구 재산 4억원 이하인 구직자",
+                  "plcyExplnCn": "취업지원 서비스를 제공합니다.",
+                  "refUrlAddr": "https://source.example.com"
+                }
+              ]
+            }
+            """,
+            last_checked="2026-07-02",
+        )
+
+        policy = policies[0]
+        conditions_by_field = {condition.field: condition for condition in policy.conditions}
+
+        self.assertIn("income_level", policy.required_fields)
+        self.assertIn("assets", policy.required_fields)
+        self.assertIn("income_level", conditions_by_field)
+        self.assertIn("assets", conditions_by_field)
+        self.assertIn("기준중위소득", conditions_by_field["income_level"].source_text)
+        self.assertIn("가구 재산", conditions_by_field["assets"].source_text)
+        self.assertEqual(conditions_by_field["income_level"].source_url, "https://source.example.com")
+        self.assertTrue(any("기준중위소득" in text for text in policy.evidence_texts))
+
     def test_zip_codes_override_supervising_agency_region(self) -> None:
         policies = normalize_youthcenter_response(
             """

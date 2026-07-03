@@ -5,15 +5,52 @@ import json
 import re
 import xml.etree.ElementTree as ET
 
-from app.schemas import Policy
+from app.schemas import Condition, Policy
+from app.slot_questions import label_for_field
+
+
+TEXT_EVIDENCE_KEYS = [
+    "name",
+    "target",
+    "selection",
+    "description",
+    "benefit",
+    "period",
+    "application",
+    "etc",
+]
+
+REQUIRED_FIELD_KEYWORD_RULES = [
+    ("income_level", ["소득", "연소득", "중위소득", "기준중위소득", "건강보험료"]),
+    ("assets", ["재산", "자산"]),
+    ("housing_status", ["무주택", "주거", "임차", "월세", "전세"]),
+    ("lease_contract", ["임대차", "전세계약", "임차계약", "임차보증금"]),
+    ("lease_deposit", ["임차보증금", "전세보증금", "보증금"]),
+    ("guarantee_insurance_status", ["전세보증금반환보증", "보증료", "보증 가입"]),
+    ("work_income", ["근로소득", "사업소득"]),
+    ("work_status", ["재직", "근로", "주 40시간", "근무"]),
+    ("recent_job_search_activity", ["구직활동", "취업활동", "취업지원 서비스"]),
+    ("recent_employment_history", ["취업 이력", "고용보험", "가입 이력"]),
+    ("interview_experience", ["면접", "면접확인서", "면접 참여"]),
+    ("program_participation_history", ["중복", "유사사업", "참여 이력", "참여이력"]),
+    ("student_or_graduate_status", ["재학", "휴학", "졸업", "대학생"]),
+    ("loan_history", ["학자금"]),
+    ("artist_status", ["예술인", "예술활동증명", "예술활동"]),
+    ("farming_status", ["농업인", "영농", "농업", "독립경영"]),
+    ("business_status", ["창업", "사업자", "사업계획"]),
+    ("certification_exam_status", ["국가기술자격", "자격증", "응시료", "시험"]),
+    ("application_period", ["신청기간", "접수", "마감", "선착순", "신청 가능"]),
+]
 
 
 def normalize_youthcenter_policy(raw_policy: dict) -> Policy:
     """Convert one 온통청년 API item into the internal Policy schema."""
+    evidence_texts = _policy_evidence_texts(raw_policy)
     required_fields = _merge_required_fields(
         _split_csv(raw_policy.get("required_fields")),
-        _infer_required_fields(raw_policy),
+        _infer_required_fields(evidence_texts),
     )
+    source_url = raw_policy.get("source_url", "")
 
     return Policy(
         id=raw_policy.get("id", ""),
@@ -23,10 +60,12 @@ def normalize_youthcenter_policy(raw_policy: dict) -> Policy:
         age_max=_parse_int(raw_policy.get("age_max")),
         employment_status=_split_csv(raw_policy.get("employment_status")),
         required_fields=required_fields,
+        conditions=_conditions_from_required_fields(required_fields, evidence_texts, source_url),
+        evidence_texts=evidence_texts,
         description=raw_policy.get("description", ""),
         benefit=raw_policy.get("benefit", ""),
         apply_url=raw_policy.get("apply_url", ""),
-        source_url=raw_policy.get("source_url", ""),
+        source_url=source_url,
         last_checked=raw_policy.get("last_checked", ""),
     )
 
@@ -72,8 +111,13 @@ def _raw_policy_from_xml(item: ET.Element, last_checked: str | None = None) -> d
             _first_text(item, ["employmentStatus", "empmSttsCn", "jobCdNm"])
         ),
         "required_fields": _first_text(item, ["requiredFields"]),
+        "target": _first_text(item, ["target", "sprtTrgtCn", "plcySprtTrgtCn", "aplyTrgtCn"]),
+        "selection": _first_text(item, ["selection", "slctnMthdCn", "slctnCn"]),
         "description": _first_text(item, ["description", "polyItcnCn", "plcyExplnCn"]),
         "benefit": _first_text(item, ["benefit", "sporCn", "plcySprtCn"]),
+        "period": _first_text(item, ["period", "aplyYmd", "rqutPrdCn", "aplyPrdCn"]),
+        "application": _first_text(item, ["application", "rqutProcCn", "aplyMthdCn"]),
+        "etc": _first_text(item, ["etc", "etcMttrCn", "sbmsnDcmntCn"]),
         "apply_url": _first_text(item, ["applyUrl", "rqutUrla", "aplyUrlAddr"]),
         "source_url": _first_text(item, ["sourceUrl", "rfcSiteUrla1", "rfcSiteUrla2", "refUrlAddr"]),
         "last_checked": _first_text(item, ["lastChecked"]) or last_checked or date.today().isoformat(),
@@ -94,8 +138,13 @@ def _raw_policy_from_dict(item: dict, last_checked: str | None = None) -> dict:
             _first_dict_value(item, ["employmentStatus", "empmSttsCn", "jobCdNm"])
         ),
         "required_fields": _first_dict_value(item, ["requiredFields"]),
+        "target": _first_dict_value(item, ["target", "sprtTrgtCn", "plcySprtTrgtCn", "aplyTrgtCn"]),
+        "selection": _first_dict_value(item, ["selection", "slctnMthdCn", "slctnCn"]),
         "description": _first_dict_value(item, ["description", "polyItcnCn", "plcyExplnCn"]),
         "benefit": _first_dict_value(item, ["benefit", "sporCn", "plcySprtCn"]),
+        "period": _first_dict_value(item, ["period", "aplyYmd", "rqutPrdCn", "aplyPrdCn"]),
+        "application": _first_dict_value(item, ["application", "rqutProcCn", "aplyMthdCn"]),
+        "etc": _first_dict_value(item, ["etc", "etcMttrCn", "sbmsnDcmntCn"]),
         "apply_url": _first_dict_value(item, ["applyUrl", "rqutUrla", "aplyUrlAddr"]),
         "source_url": _first_dict_value(item, ["sourceUrl", "rfcSiteUrla1", "rfcSiteUrla2", "refUrlAddr"]),
         "last_checked": _first_dict_value(item, ["lastChecked"]) or last_checked or date.today().isoformat(),
@@ -307,37 +356,13 @@ def _normalize_employment_status(value: str | None) -> str:
     return ",".join(dict.fromkeys(statuses))
 
 
-def _infer_required_fields(raw_policy: dict) -> list[str]:
-    text = " ".join(
-        str(raw_policy.get(key, ""))
-        for key in ["name", "description", "benefit"]
-        if raw_policy.get(key)
-    )
+def _infer_required_fields(evidence_texts: list[str]) -> list[str]:
+    text = " ".join(evidence_texts)
     if not text:
         return []
 
-    keyword_rules = [
-        ("income_level", ["소득", "연소득", "중위소득", "기준중위소득", "건강보험료"]),
-        ("assets", ["재산", "자산"]),
-        ("housing_status", ["무주택", "주거", "임차", "월세", "전세"]),
-        ("lease_contract", ["임대차", "전세계약", "임차계약", "임차보증금"]),
-        ("lease_deposit", ["임차보증금", "전세보증금", "보증금"]),
-        ("guarantee_insurance_status", ["전세보증금반환보증", "보증료", "보증 가입"]),
-        ("work_income", ["근로소득", "사업소득"]),
-        ("work_status", ["재직", "근로", "주 40시간", "근무"]),
-        ("recent_job_search_activity", ["구직활동", "취업활동"]),
-        ("program_participation_history", ["중복", "유사사업", "참여 이력", "참여이력"]),
-        ("student_or_graduate_status", ["재학", "휴학", "졸업", "대학생"]),
-        ("loan_history", ["학자금"]),
-        ("artist_status", ["예술인", "예술활동증명", "예술활동"]),
-        ("farming_status", ["농업인", "영농", "농업", "독립경영"]),
-        ("business_status", ["창업", "사업자", "사업계획"]),
-        ("certification_exam_status", ["국가기술자격", "자격증", "응시료", "시험"]),
-        ("application_period", ["신청기간", "접수", "마감", "선착순"]),
-    ]
-
     fields = []
-    for field, keywords in keyword_rules:
+    for field, keywords in REQUIRED_FIELD_KEYWORD_RULES:
         if any(keyword in text for keyword in keywords):
             fields.append(field)
 
@@ -346,3 +371,60 @@ def _infer_required_fields(raw_policy: dict) -> list[str]:
 
 def _merge_required_fields(existing_fields: list[str], inferred_fields: list[str]) -> list[str]:
     return list(dict.fromkeys(existing_fields + inferred_fields))
+
+
+def _policy_evidence_texts(raw_policy: dict) -> list[str]:
+    texts: list[str] = []
+    for key in TEXT_EVIDENCE_KEYS:
+        for sentence in _split_evidence_sentences(raw_policy.get(key, "")):
+            if sentence not in texts:
+                texts.append(sentence)
+    return texts
+
+
+def _split_evidence_sentences(value: str | None) -> list[str]:
+    if not value:
+        return []
+
+    normalized = re.sub(r"<[^>]+>", " ", str(value))
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return []
+
+    chunks = [
+        chunk.strip(" -·•")
+        for chunk in re.split(r"(?<=[.!?。])\s+|[\n\r]+|[;；]", normalized)
+        if chunk.strip(" -·•")
+    ]
+    if not chunks:
+        return []
+
+    return [chunk[:240] for chunk in chunks]
+
+
+def _conditions_from_required_fields(
+    fields: list[str],
+    evidence_texts: list[str],
+    source_url: str,
+) -> list[Condition]:
+    conditions: list[Condition] = []
+    for field in fields:
+        source_text = _source_text_for_field(field, evidence_texts)
+        conditions.append(
+            Condition(
+                field=field,
+                operator="required",
+                label=label_for_field(field),
+                source_text=source_text,
+                source_url=source_url if source_text else "",
+            )
+        )
+    return conditions
+
+
+def _source_text_for_field(field: str, evidence_texts: list[str]) -> str:
+    keywords = dict(REQUIRED_FIELD_KEYWORD_RULES).get(field, [])
+    for text in evidence_texts:
+        if any(keyword in text for keyword in keywords):
+            return text
+    return ""

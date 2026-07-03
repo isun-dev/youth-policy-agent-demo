@@ -177,10 +177,6 @@ def question_for_condition(condition: object, policy_name: str | None = None) ->
     if question:
         return question
 
-    source_text = getattr(condition, "source_text", "")
-    if source_text:
-        return f"'{source_text}' 조건에 해당하나요?"
-
     return question_for_field(getattr(condition, "field", ""), policy_name=policy_name)
 
 

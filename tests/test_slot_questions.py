@@ -81,12 +81,12 @@ class SlotQuestionsTest(unittest.TestCase):
             "가구 소득이 기준중위소득 120% 이하인가요?",
         )
 
-    def test_condition_question_uses_source_text_when_no_question_exists(self) -> None:
+    def test_condition_question_uses_field_question_when_no_question_exists(self) -> None:
         condition = Condition(field="income_level", source_text="기준중위소득 120% 이하")
 
         self.assertEqual(
             question_for_condition(condition),
-            "'기준중위소득 120% 이하' 조건에 해당하나요?",
+            "소득 기준에 해당하나요?",
         )
 
     def test_guide_for_income_avoids_collecting_exact_amounts(self) -> None:

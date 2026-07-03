@@ -70,6 +70,7 @@ class Policy(BaseModel):
     employment_status: list[str] = Field(default_factory=list)
     required_fields: list[str] = Field(default_factory=list)
     conditions: list[Condition] = Field(default_factory=list)
+    evidence_texts: list[str] = Field(default_factory=list)
     description: str = ""
     benefit: str = ""
     apply_url: str = ""
