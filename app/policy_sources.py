@@ -7,6 +7,7 @@ from app.gyeonggi_client import GYEONGGI_JOB_ENDPOINTS, GyeonggiClient, load_gye
 from app.policy_detail_enricher import enrich_policies_with_detail_pages
 from app.retriever import load_policies
 from app.schemas import Policy
+from app.sensitive import redact_sensitive_text
 from app.youthcenter_client import YouthCenterClient, load_youthcenter_config
 
 
@@ -50,21 +51,39 @@ def load_policies_from_source(
             progress_callback=progress_callback,
         )
     if source == SOURCE_COMBINED:
-        policies = [
-            *load_youthcenter_api_policies(
-                page_size=page_size,
-                pages=pages,
-                progress_callback=progress_callback,
-            ),
-            *load_gyeonggi_api_policies(
-                page_size=page_size,
-                pages=pages,
-                fetch_details=gyeonggi_fetch_details,
-                detail_limit=gyeonggi_detail_limit,
-                progress_callback=progress_callback,
-            ),
-        ]
-        return _deduplicate_policies(policies)
+        policies: list[Policy] = []
+        errors: list[str] = []
+
+        try:
+            policies.extend(
+                load_youthcenter_api_policies(
+                    page_size=page_size,
+                    pages=pages,
+                    progress_callback=progress_callback,
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - combined mode should keep partial results.
+            errors.append(f"온통청년 API: {redact_sensitive_text(error)}")
+            _notify(progress_callback, "온통청년 API를 불러오지 못해 경기도 API 결과만 확인합니다.")
+
+        try:
+            policies.extend(
+                load_gyeonggi_api_policies(
+                    page_size=page_size,
+                    pages=pages,
+                    fetch_details=gyeonggi_fetch_details,
+                    detail_limit=gyeonggi_detail_limit,
+                    progress_callback=progress_callback,
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - combined mode should keep partial results.
+            errors.append(f"경기도 잡아바 API: {redact_sensitive_text(error)}")
+            _notify(progress_callback, "경기도 잡아바 API를 불러오지 못해 온통청년 API 결과만 확인합니다.")
+
+        if policies:
+            return _deduplicate_policies(policies)
+
+        raise RuntimeError("통합 API 출처를 모두 불러오지 못했습니다. " + " / ".join(errors))
 
     raise ValueError(f"지원하지 않는 정책 데이터 출처입니다: {source}")
 
@@ -138,3 +157,8 @@ def _deduplicate_policies(policies: list[Policy]) -> list[Policy]:
         seen_policy_ids.add(policy.id)
         deduplicated.append(policy)
     return deduplicated
+
+
+def _notify(callback: Callable[[str], None] | None, message: str) -> None:
+    if callback is not None:
+        callback(message)

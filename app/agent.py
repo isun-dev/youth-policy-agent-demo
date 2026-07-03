@@ -4,7 +4,12 @@ from pathlib import Path
 
 from app.answer_generator import generate_answer
 from app.eligibility import check_all
-from app.policy_sources import load_gyeonggi_api_policies, load_youthcenter_api_policies
+from app.policy_sources import (
+    SOURCE_COMBINED,
+    load_gyeonggi_api_policies,
+    load_policies_from_source,
+    load_youthcenter_api_policies,
+)
 from app.retriever import load_policies, retrieve_policies
 from app.schemas import Policy, UserIntent, UserProfile
 from app.slot_filling import (
@@ -63,15 +68,14 @@ def run_agent_from_combined_api(
     fetch_details: bool = True,
     detail_limit: int = 10,
 ) -> str:
-    policies = [
-        *load_youthcenter_api_policies(page_size=page_size, pages=pages),
-        *load_gyeonggi_api_policies(
-            page_size=page_size,
-            pages=pages,
-            fetch_details=fetch_details,
-            detail_limit=detail_limit,
-        ),
-    ]
+    policies = load_policies_from_source(
+        SOURCE_COMBINED,
+        sample_path=Path("data/policies.sample.json"),
+        page_size=page_size,
+        pages=pages,
+        gyeonggi_fetch_details=fetch_details,
+        gyeonggi_detail_limit=detail_limit,
+    )
     return run_agent_with_policies(profile, policies, slot_fill=slot_fill, intent=intent)
 
 
