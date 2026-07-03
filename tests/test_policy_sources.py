@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from app.policy_sources import load_policies_from_source
+from app.policy_sources import _normalize_gyeonggi_job_response_fallback, load_policies_from_source
 from app.schemas import Policy
 
 
@@ -97,6 +97,32 @@ class PolicySourcesTest(unittest.TestCase):
             )
 
         self.assertIn("통합 API 출처를 모두 불러오지 못했습니다", str(context.exception))
+
+    def test_gyeonggi_fallback_normalizer_handles_list_response(self) -> None:
+        policies = _normalize_gyeonggi_job_response_fallback(
+            """
+            {
+              "JobFndtnEduTraing": [
+                {
+                  "row": [
+                    {
+                      "PBLANC_TITLE": "경기도 청년 교육훈련 모집",
+                      "REGION_NM": "의정부시",
+                      "DETAIL_PAGE_URL": "https://job.gg.go.kr/detail"
+                    }
+                  ]
+                }
+              ]
+            }
+            """,
+            endpoint="JobFndtnEduTraing",
+        )
+
+        self.assertEqual(len(policies), 1)
+        self.assertEqual(policies[0].name, "경기도 청년 교육훈련 모집")
+        self.assertEqual(policies[0].region, ["의정부시"])
+        self.assertEqual(policies[0].source_url, "https://job.gg.go.kr/detail")
+        self.assertIn("official_detail_criteria", policies[0].required_fields)
 
 
 if __name__ == "__main__":

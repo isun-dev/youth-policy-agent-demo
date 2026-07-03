@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from pathlib import Path
 
 from app.gyeonggi_client import GYEONGGI_JOB_ENDPOINTS, GyeonggiClient, load_gyeonggi_config
@@ -120,7 +121,10 @@ def load_gyeonggi_api_policies(
     detail_limit: int = 10,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[Policy]:
-    from app.policy_normalizer import normalize_gyeonggi_job_response
+    try:
+        from app.policy_normalizer import normalize_gyeonggi_job_response
+    except ImportError:
+        normalize_gyeonggi_job_response = _normalize_gyeonggi_job_response_fallback
 
     config = load_gyeonggi_config()
     client = GyeonggiClient.from_config(config)
@@ -162,3 +166,83 @@ def _deduplicate_policies(policies: list[Policy]) -> list[Policy]:
 def _notify(callback: Callable[[str], None] | None, message: str) -> None:
     if callback is not None:
         callback(message)
+
+
+def _normalize_gyeonggi_job_response_fallback(response_text: str, endpoint: str) -> list[Policy]:
+    """Minimal 경기도 OpenAPI normalizer used when deployment files are out of sync."""
+    try:
+        data = json.loads(response_text)
+    except json.JSONDecodeError:
+        return []
+
+    policies = []
+    for index, row in enumerate(_find_gyeonggi_rows(data), start=1):
+        title = _first_row_value(
+            row,
+            ["PBLANC_TITLE", "POLICY_NM", "TITLE", "SUBJECT", "BIZ_NM", "name"],
+        )
+        detail_url = _first_row_value(
+            row,
+            ["DETAIL_PAGE_URL", "DETAIL_URL", "APPLY_URL", "URL", "HMPG_URL"],
+        )
+        region = _normalize_gyeonggi_region(
+            _first_row_value(row, ["SIGUN_NM", "REGION_NM", "AREA_NM", "CITY_NM"])
+        )
+        period = " ".join(
+            part
+            for part in [
+                _first_row_value(row, ["RECRUT_BEGIN_DE", "APPLY_BEGIN_DE"]),
+                _first_row_value(row, ["RECRUT_END_DE", "APPLY_END_DE"]),
+            ]
+            if part
+        )
+        policies.append(
+            Policy(
+                id=_first_row_value(row, ["POLICY_ID", "BIZ_ID", "PBLANC_ID", "SEQ", "SN"])
+                or f"{endpoint}:{title or index}:{index}",
+                name=title,
+                region=[region] if region else ["경기도"],
+                required_fields=["official_detail_criteria"],
+                evidence_texts=[text for text in [title, period] if text],
+                description=title,
+                apply_url=detail_url,
+                source_url=detail_url or f"https://openapi.gg.go.kr/{endpoint}",
+            )
+        )
+    return policies
+
+
+def _find_gyeonggi_rows(data: object) -> list[dict]:
+    if isinstance(data, list):
+        rows: list[dict] = []
+        for item in data:
+            rows.extend(_find_gyeonggi_rows(item))
+        return rows
+    if not isinstance(data, dict):
+        return []
+
+    row = data.get("row")
+    if isinstance(row, list):
+        return [item for item in row if isinstance(item, dict)]
+    if isinstance(row, dict):
+        return [row]
+
+    for value in data.values():
+        found = _find_gyeonggi_rows(value)
+        if found:
+            return found
+    return []
+
+
+def _first_row_value(row: dict, keys: list[str]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _normalize_gyeonggi_region(value: str) -> str:
+    if not value or value in {"경기도", "경기", "전체", "전지역", "경기도 전체", "경기전체"}:
+        return "경기도"
+    return value
