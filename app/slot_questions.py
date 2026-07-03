@@ -29,6 +29,7 @@ FIELD_QUESTIONS = {
     "business_status": "창업자, 예비창업자 또는 사업자 요건에 해당하나요?",
     "certification_exam_status": "응시하려는 시험이 지원 대상 자격시험인가요?",
     "application_period": "현재 신청기간 내에 신청할 수 있나요?",
+    "official_detail_criteria": "공식 상세 페이지의 자격요건을 확인했나요?",
 }
 
 
@@ -60,6 +61,7 @@ FIELD_LABELS = {
     "business_status": "창업 상태",
     "certification_exam_status": "자격시험 조건",
     "application_period": "신청기간",
+    "official_detail_criteria": "공식 상세 자격요건",
 }
 
 
@@ -85,6 +87,10 @@ FIELD_GUIDES = {
     "employment_insurance": (
         "고용보험 가입 여부는 개인정보성 정보입니다. 이 화면에는 가입 여부만 임시로 반영하고 "
         "증빙자료나 번호는 입력하지 않습니다."
+    ),
+    "official_detail_criteria": (
+        "목록 API 응답만으로는 세부 자격요건을 확정하기 어렵습니다. 공식 상세 페이지에서 "
+        "대상, 신청기간, 제외 조건을 확인한 뒤 해당 여부만 선택하세요."
     ),
 }
 

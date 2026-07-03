@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from app.policy_normalizer import normalize_youthcenter_json, normalize_youthcenter_response, normalize_youthcenter_xml
+from app.policy_normalizer import (
+    normalize_gyeonggi_job_json,
+    normalize_gyeonggi_job_response,
+    normalize_youthcenter_json,
+    normalize_youthcenter_response,
+    normalize_youthcenter_xml,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -182,6 +188,109 @@ class PolicyNormalizerTest(unittest.TestCase):
         )
 
         self.assertEqual(policies[0].region, ["전국"])
+
+    def test_normalizes_gyeonggi_job_row_response(self) -> None:
+        json_text = """
+        {
+          "JobFndtnSportPolocy": [
+            {
+              "head": [
+                {"list_total_count": 1},
+                {"RESULT": {"CODE": "INFO-000", "MESSAGE": "정상 처리되었습니다."}}
+              ]
+            },
+            {
+              "row": [
+                {
+                  "POLICY_ID": "GG-001",
+                  "POLICY_NM": "경기도 청년 면접 지원",
+                  "SIGUN_NM": "의정부시",
+                  "TRGET_AGE": "만 18세 ~ 39세",
+                  "SPRT_TRGET_CN": "경기도 거주 미취업 청년",
+                  "SPRT_CN": "면접 준비 비용 지원",
+                  "APPLY_URL": "https://apply.example.com"
+                }
+              ]
+            }
+          ]
+        }
+        """
+
+        policies = normalize_gyeonggi_job_json(
+            json_text,
+            endpoint="JobFndtnSportPolocy",
+            last_checked="2026-07-03",
+        )
+
+        self.assertEqual(len(policies), 1)
+        self.assertEqual(policies[0].id, "GG-001")
+        self.assertEqual(policies[0].name, "경기도 청년 면접 지원")
+        self.assertEqual(policies[0].region, ["의정부시"])
+        self.assertEqual(policies[0].age_min, 18)
+        self.assertEqual(policies[0].age_max, 39)
+        self.assertEqual(policies[0].employment_status, ["job_seeker", "unemployed"])
+        self.assertEqual(policies[0].benefit, "면접 준비 비용 지원")
+        self.assertEqual(policies[0].apply_url, "https://apply.example.com")
+        self.assertEqual(policies[0].last_checked, "2026-07-03")
+
+    def test_gyeonggi_response_keeps_text_as_condition_evidence(self) -> None:
+        policies = normalize_gyeonggi_job_response(
+            """
+            {
+              "JobFndtnEduTraing": [
+                {
+                  "row": [
+                    {
+                      "EDU_TRAING_NM": "청년 취업 교육",
+                      "TRGET_CN": "소득 기준 확인이 필요한 구직 청년",
+                      "EDU_TRAING_CN": "직무 교육과 취업활동을 지원합니다."
+                    }
+                  ]
+                }
+              ]
+            }
+            """,
+            endpoint="JobFndtnEduTraing",
+            last_checked="2026-07-03",
+        )
+
+        policy = policies[0]
+        self.assertIn("income_level", policy.required_fields)
+        self.assertTrue(any("소득 기준" in text for text in policy.evidence_texts))
+        self.assertEqual(policy.conditions[0].source_url, "https://openapi.gg.go.kr/JobFndtnEduTraing")
+
+    def test_gyeonggi_list_only_response_requires_official_detail_check(self) -> None:
+        policies = normalize_gyeonggi_job_response(
+            """
+            {
+              "JobFndtnEduTraing": [
+                {
+                  "row": [
+                    {
+                      "PBLANC_TITLE": "경기도 청년 교육훈련 모집",
+                      "INST_NM": "경기도일자리재단",
+                      "RECRUT_BEGIN_DE": "2026-07-01",
+                      "RECRUT_END_DE": "2026-07-31",
+                      "DIV_NM": "교육훈련",
+                      "REGION_NM": "의정부시",
+                      "DETAIL_PAGE_URL": "https://apply.example.com/detail"
+                    }
+                  ]
+                }
+              ]
+            }
+            """,
+            endpoint="JobFndtnEduTraing",
+            last_checked="2026-07-03",
+        )
+
+        policy = policies[0]
+        self.assertEqual(policy.name, "경기도 청년 교육훈련 모집")
+        self.assertEqual(policy.region, ["의정부시"])
+        self.assertEqual(policy.apply_url, "https://apply.example.com/detail")
+        self.assertEqual(policy.source_url, "https://apply.example.com/detail")
+        self.assertIn("official_detail_criteria", policy.required_fields)
+        self.assertIn("상세 자격요건", policy.conditions[0].label)
 
 
 if __name__ == "__main__":

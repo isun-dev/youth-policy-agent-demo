@@ -16,9 +16,11 @@ sys.path.append(str(PROJECT_ROOT))
 
 from app.answer_generator import STATUS_LABELS
 from app.eligibility import check_all
+from app.gyeonggi_client import GYEONGGI_JOB_ENDPOINTS, GyeonggiClient, load_gyeonggi_config
 from app.input_parser import normalize_employment_status
 from app.natural_language_parser import parse_natural_language_input
-from app.policy_normalizer import normalize_youthcenter_response
+from app.policy_detail_enricher import enrich_policies_with_detail_pages
+from app.policy_normalizer import normalize_gyeonggi_job_response, normalize_youthcenter_response
 from app.retriever import load_policies, retrieve_policies
 from app.schemas import (
     ConditionCheck,
@@ -45,6 +47,7 @@ ANSWER_OPTIONS = {
 DATA_SOURCE_OPTIONS = {
     "샘플 데이터": "sample",
     "온통청년 API": "api",
+    "경기도 잡아바 API": "gyeonggi",
 }
 EMPLOYMENT_STATUS_LABELS = {
     "job_seeker": "구직 중",
@@ -466,6 +469,7 @@ def _render_user_search_form(form_key: str) -> None:
         default_use_llm=True,
         default_page_size=_default_user_api_page_size(),
         default_pages=_default_user_api_pages(),
+        default_detail_limit=_default_gyeonggi_detail_limit(),
     )
 
 
@@ -479,6 +483,7 @@ def _render_search_form(
     default_use_llm: bool = False,
     default_page_size: int = 20,
     default_pages: int = 5,
+    default_detail_limit: int = 10,
 ) -> None:
     st.subheader(title)
     st.write("한 문장으로 먼저 적고, 부족한 값은 아래 입력값으로 보완합니다.")
@@ -506,6 +511,7 @@ def _render_search_form(
 
         page_size = default_page_size
         pages = default_pages
+        detail_limit = default_detail_limit
         if show_api_settings:
             with st.expander("API 가져오기 설정", expanded=False):
                 page_size = st.number_input(
@@ -521,6 +527,14 @@ def _render_search_form(
                     max_value=20,
                     value=default_pages,
                     step=1,
+                )
+                detail_limit = st.number_input(
+                    "경기도 상세 페이지 확인 수",
+                    min_value=0,
+                    max_value=50,
+                    value=default_detail_limit,
+                    step=1,
+                    help="경기도 API 목록 결과 중 공식 상세 페이지 HTML을 가져와 근거 문장을 보강할 최대 정책 수입니다.",
                 )
 
         submitted = st.form_submit_button(
@@ -548,11 +562,12 @@ def _render_search_form(
                 data_source,
                 page_size=int(page_size),
                 pages=int(pages),
+                detail_limit=int(detail_limit),
                 progress_callback=lambda message: st.write(message),
             )
         except Exception as error:  # noqa: BLE001 - UI should show external API/setup errors.
             status.update(label="정책 데이터를 불러오지 못했습니다.", state="error", expanded=True)
-            st.error("정책 데이터를 불러오지 못했습니다. .env 설정 또는 온통청년 API 응답 상태를 확인해 주세요.")
+            st.error("정책 데이터를 불러오지 못했습니다. .env 설정 또는 외부 API 응답 상태를 확인해 주세요.")
             if show_data_source:
                 st.caption(f"개발자 참고: {redact_sensitive_text(error)}")
             return
@@ -593,10 +608,18 @@ def _load_policies(
     data_source: str,
     page_size: int,
     pages: int,
+    detail_limit: int,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[Policy]:
     if data_source == "sample":
         return load_policies(POLICY_PATH)
+    if data_source == "gyeonggi":
+        return _load_gyeonggi_policies(
+            page_size=page_size,
+            pages=pages,
+            detail_limit=detail_limit,
+            progress_callback=progress_callback,
+        )
 
     config = load_youthcenter_config()
     client = YouthCenterClient.from_config(config)
@@ -616,9 +639,43 @@ def _load_policies(
     return policies
 
 
+def _load_gyeonggi_policies(
+    page_size: int,
+    pages: int,
+    detail_limit: int,
+    progress_callback: Callable[[str], None] | None = None,
+) -> list[Policy]:
+    config = load_gyeonggi_config()
+    client = GyeonggiClient.from_config(config)
+    policies: list[Policy] = []
+    seen_policy_ids: set[str] = set()
+
+    for endpoint in GYEONGGI_JOB_ENDPOINTS:
+        for page in range(1, pages + 1):
+            if progress_callback is not None:
+                progress_callback(f"경기도 잡아바 API에서 {endpoint} 데이터를 가져오는 중입니다. ({page}/{pages})")
+            response_text = client.fetch_endpoint(endpoint, page=page, page_size=page_size)
+            for policy in normalize_gyeonggi_job_response(response_text, endpoint=endpoint):
+                if policy.id in seen_policy_ids:
+                    continue
+                seen_policy_ids.add(policy.id)
+                policies.append(policy)
+
+    if _gyeonggi_fetch_details_enabled():
+        policies = enrich_policies_with_detail_pages(
+            policies,
+            detail_limit=detail_limit,
+            progress_callback=progress_callback,
+        )
+
+    return policies
+
+
 def _loading_source_message(data_source: str) -> str:
     if data_source == "api":
         return "온통청년 API에서 최신 정책 후보를 확인하고 있습니다."
+    if data_source == "gyeonggi":
+        return "경기도 잡아바 API에서 일자리/교육/대외활동 후보를 확인하고 있습니다."
     return "샘플 정책 데이터에서 후보를 확인하고 있습니다."
 
 
@@ -1000,10 +1057,12 @@ def _developer_ui_enabled() -> bool:
 
 def _default_user_data_source() -> str:
     configured_source = os.getenv("USER_DATA_SOURCE", "").strip().lower()
-    if configured_source in {"sample", "api"}:
+    if configured_source in {"sample", "api", "gyeonggi"}:
         return configured_source
     if os.getenv("YOUTHCENTER_API_KEY", "").strip() and os.getenv("YOUTHCENTER_API_BASE_URL", "").strip():
         return "api"
+    if os.getenv("GYEONGGI_API_KEY", "").strip():
+        return "gyeonggi"
     return "sample"
 
 
@@ -1013,6 +1072,19 @@ def _default_user_api_page_size() -> int:
 
 def _default_user_api_pages() -> int:
     return _integer_from_env("USER_API_PAGES", default=5, minimum=1, maximum=20)
+
+
+def _default_gyeonggi_detail_limit() -> int:
+    return _integer_from_env("GYEONGGI_DETAIL_LIMIT", default=10, minimum=0, maximum=50)
+
+
+def _gyeonggi_fetch_details_enabled() -> bool:
+    return os.getenv("GYEONGGI_FETCH_DETAILS", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
 
 def _integer_from_env(name: str, default: int, minimum: int, maximum: int) -> int:

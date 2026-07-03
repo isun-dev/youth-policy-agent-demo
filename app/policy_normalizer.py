@@ -79,6 +79,93 @@ def normalize_youthcenter_response(response_text: str, last_checked: str | None 
     return normalize_youthcenter_xml(text, last_checked=last_checked)
 
 
+def normalize_gyeonggi_job_response(
+    response_text: str,
+    endpoint: str,
+    last_checked: str | None = None,
+) -> list[Policy]:
+    """Convert one 경기도 OpenAPI response into internal Policy records."""
+    text = response_text.strip()
+    if not text:
+        return []
+    if text.startswith("{") or text.startswith("["):
+        return normalize_gyeonggi_job_json(text, endpoint=endpoint, last_checked=last_checked)
+    return normalize_gyeonggi_job_xml(text, endpoint=endpoint, last_checked=last_checked)
+
+
+def normalize_gyeonggi_job_json(
+    json_text: str,
+    endpoint: str,
+    last_checked: str | None = None,
+) -> list[Policy]:
+    data = json.loads(json_text)
+    rows = _find_gyeonggi_rows(data)
+    return [
+        normalize_youthcenter_policy(
+            _raw_policy_from_gyeonggi_dict(row, endpoint=endpoint, index=index, last_checked=last_checked)
+        )
+        for index, row in enumerate(rows, start=1)
+    ]
+
+
+def normalize_gyeonggi_job_xml(
+    xml_text: str,
+    endpoint: str,
+    last_checked: str | None = None,
+) -> list[Policy]:
+    root = ET.fromstring(xml_text)
+    rows = root.findall(".//row")
+    return [
+        normalize_youthcenter_policy(
+            _raw_policy_from_gyeonggi_xml(row, endpoint=endpoint, index=index, last_checked=last_checked)
+        )
+        for index, row in enumerate(rows, start=1)
+    ]
+
+
+def enrich_policy_with_detail_text(
+    policy: Policy,
+    detail_text: str,
+    source_url: str,
+    last_checked: str | None = None,
+) -> Policy:
+    """Attach official detail-page text and re-run condition inference."""
+    if not detail_text.strip():
+        return policy
+
+    existing_required_fields = list(policy.required_fields)
+    raw_policy = {
+        "id": policy.id,
+        "name": policy.name,
+        "region": ",".join(policy.region),
+        "age_min": str(policy.age_min) if policy.age_min is not None else "",
+        "age_max": str(policy.age_max) if policy.age_max is not None else "",
+        "employment_status": ",".join(policy.employment_status),
+        "required_fields": ",".join(existing_required_fields),
+        "target": detail_text,
+        "selection": detail_text,
+        "description": policy.description or detail_text,
+        "benefit": policy.benefit,
+        "period": "",
+        "application": "",
+        "etc": "",
+        "apply_url": policy.apply_url,
+        "source_url": source_url or policy.source_url,
+        "last_checked": last_checked or policy.last_checked or date.today().isoformat(),
+    }
+    enriched = normalize_youthcenter_policy(raw_policy)
+    if enriched.required_fields:
+        return enriched
+
+    return normalize_youthcenter_policy(
+        {
+            **raw_policy,
+            "required_fields": "official_detail_criteria",
+            "selection": "상세 페이지 본문을 가져왔지만 자동으로 구조화 가능한 자격요건을 찾지 못했습니다.",
+        }
+    )
+
+
 def normalize_youthcenter_json(json_text: str, last_checked: str | None = None) -> list[Policy]:
     data = json.loads(json_text)
     items = _find_policy_dicts(data)
@@ -151,6 +238,212 @@ def _raw_policy_from_dict(item: dict, last_checked: str | None = None) -> dict:
     }
 
 
+def _raw_policy_from_gyeonggi_dict(
+    item: dict,
+    endpoint: str,
+    index: int,
+    last_checked: str | None = None,
+) -> dict:
+    source_url = _first_dict_value(
+        item,
+        [
+            "sourceUrl",
+            "SOURCE_URL",
+            "REF_URL",
+            "REFER_URL",
+            "DETAIL_URL",
+            "DETAIL_PAGE_URL",
+            "LINK_URL",
+            "URL",
+            "HMPG_URL",
+            "HMPG_ADDR",
+            "홈페이지주소",
+            "참조URL",
+        ],
+    )
+    apply_url = _first_dict_value(
+        item,
+        [
+            "applyUrl",
+            "APPLY_URL",
+            "REQST_URL",
+            "RQUT_URL",
+            "RCPT_URL",
+            "DETAIL_PAGE_URL",
+            "LINK_URL",
+            "URL",
+            "HMPG_URL",
+            "HMPG_ADDR",
+            "신청URL",
+        ],
+    )
+    target_text = _first_dict_value(
+        item,
+        [
+            "target",
+            "TARGET",
+            "TRGET",
+            "TRGET_CN",
+            "TRGET_INFO",
+            "SPRT_TRGET_CN",
+            "SPORT_TRGET_CN",
+            "QUALF_CN",
+            "지원대상",
+            "대상",
+        ],
+    )
+    age_text = _first_dict_value(
+        item,
+        [
+            "ageInfo",
+            "AGE_INFO",
+            "AGE_LIMIT",
+            "TRGET_AGE",
+            "SPRT_TRGET_AGE",
+            "SPORT_TRGET_AGE",
+            "지원연령",
+            "연령",
+        ],
+    ) or target_text
+    description = _first_dict_value(
+        item,
+        [
+            "description",
+            "DESCRIPTION",
+            "CONTENT",
+            "CN",
+            "DETAIL",
+            "DETAIL_CN",
+            "INTRO",
+            "SUMMARY",
+            "EDU_TRAING_CN",
+            "EDU_TRAINING_CN",
+            "ACT_CN",
+            "POLICY_CN",
+            "사업내용",
+            "내용",
+        ],
+    )
+    benefit = _first_dict_value(
+        item,
+        [
+            "benefit",
+            "BENEFIT",
+            "SPRT_CN",
+            "SPORT_CN",
+            "SUPPORT_CN",
+            "SPORT_CONTENT",
+            "지원내용",
+            "혜택",
+        ],
+    )
+    name = _first_dict_value(
+        item,
+        [
+            "name",
+            "NAME",
+            "POLICY_NM",
+            "POLICY_NAME",
+            "POLICY_TITLE",
+            "SPORT_POLOCY_NM",
+            "SPORT_POLICY_NM",
+            "BIZ_NM",
+            "TITLE",
+            "SUBJECT",
+            "EDU_TRAING_NM",
+            "EDU_TRAINING_NM",
+            "TOS_ACT_NM",
+            "ACT_NM",
+            "PBANC_NM",
+            "PBLANC_NM",
+            "PBLANC_TITLE",
+            "정책명",
+            "사업명",
+            "제목",
+        ],
+    ) or description[:60]
+
+    all_text = " ".join(_all_dict_text_values(item))
+    has_detail_criteria = any([target_text, description, benefit])
+    return {
+        "id": _first_dict_value(
+            item,
+            [
+                "id",
+                "ID",
+                "POLICY_ID",
+                "BIZ_ID",
+                "PLCY_NO",
+                "POLICY_NO",
+                "PBANC_ID",
+                "PBLANC_ID",
+                "EDU_TRAING_ID",
+                "TOS_ACT_ID",
+                "RECRUT_ID",
+                "SEQ",
+                "SN",
+                "NO",
+            ],
+        )
+        or _fallback_gyeonggi_policy_id(endpoint, name, index),
+        "name": name,
+        "region": _gyeonggi_region_from_dict(item),
+        "age_min": _parse_age_min(age_text),
+        "age_max": _parse_age_max(age_text),
+        "employment_status": _normalize_employment_status(target_text or all_text),
+        "required_fields": "" if has_detail_criteria else "official_detail_criteria",
+        "target": target_text,
+        "selection": _first_dict_value(
+            item,
+            ["selection", "SELECTION", "SLCTN_CN", "SELECT_CN", "선정기준", "선발방법"],
+        )
+        or (
+            ""
+            if has_detail_criteria
+            else "목록 API 응답에는 상세 자격요건이 포함되지 않아 공식 상세 페이지 확인이 필요합니다."
+        ),
+        "description": description,
+        "benefit": benefit,
+        "period": _first_dict_value(
+            item,
+            [
+                "period",
+                "PERIOD",
+                "RECRUT_PERIOD",
+                "RECRUT_BEGIN_DE",
+                "RECRUT_END_DE",
+                "APPLY_PERIOD",
+                "신청기간",
+                "모집기간",
+            ],
+        ),
+        "application": _first_dict_value(
+            item,
+            ["application", "APPLICATION", "REQST_MTHD", "APPLY_METHOD", "신청방법"],
+        ),
+        "etc": all_text,
+        "apply_url": apply_url,
+        "source_url": source_url or apply_url or f"https://openapi.gg.go.kr/{endpoint}",
+        "last_checked": _first_dict_value(item, ["lastChecked", "LAST_CHECKED"])
+        or last_checked
+        or date.today().isoformat(),
+    }
+
+
+def _raw_policy_from_gyeonggi_xml(
+    item: ET.Element,
+    endpoint: str,
+    index: int,
+    last_checked: str | None = None,
+) -> dict:
+    return _raw_policy_from_gyeonggi_dict(
+        {child.tag: child.text or "" for child in item},
+        endpoint=endpoint,
+        index=index,
+        last_checked=last_checked,
+    )
+
+
 def _find_policy_dicts(data: object) -> list[dict]:
     if isinstance(data, list):
         return [item for item in data if isinstance(item, dict)]
@@ -169,6 +462,30 @@ def _find_policy_dicts(data: object) -> list[dict]:
 
     for value in data.values():
         found = _find_policy_dicts(value)
+        if found:
+            return found
+
+    return []
+
+
+def _find_gyeonggi_rows(data: object) -> list[dict]:
+    if isinstance(data, list):
+        rows: list[dict] = []
+        for item in data:
+            rows.extend(_find_gyeonggi_rows(item))
+        return rows
+
+    if not isinstance(data, dict):
+        return []
+
+    row_value = data.get("row")
+    if isinstance(row_value, list):
+        return [item for item in row_value if isinstance(item, dict)]
+    if isinstance(row_value, dict):
+        return [row_value]
+
+    for value in data.values():
+        found = _find_gyeonggi_rows(value)
         if found:
             return found
 
@@ -208,6 +525,38 @@ def _first_dict_value(item: dict, keys: list[str]) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _all_dict_text_values(item: dict) -> list[str]:
+    texts = []
+    for value in item.values():
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _gyeonggi_region_from_dict(item: dict) -> str:
+    city = _first_dict_value(
+        item,
+        ["SIGUN_NM", "SIGUN", "CITY_NM", "AREA_NM", "REGION_NM", "지역", "시군명"],
+    )
+    if not city:
+        return "경기도"
+
+    if city in {"경기도", "경기", "전체", "전지역", "경기도 전체", "경기전체"}:
+        return "경기도"
+
+    return city
+
+
+def _fallback_gyeonggi_policy_id(endpoint: str, name: str, index: int) -> str:
+    normalized_name = re.sub(r"\s+", "-", name.strip())[:40]
+    if normalized_name:
+        return f"{endpoint}:{normalized_name}:{index}"
+    return f"{endpoint}:{index}"
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -399,7 +748,20 @@ def _split_evidence_sentences(value: str | None) -> list[str]:
     if not chunks:
         return []
 
-    return [chunk[:240] for chunk in chunks]
+    evidence_chunks: list[str] = []
+    for chunk in chunks:
+        evidence_chunks.extend(_chunk_text(chunk, size=240))
+    return evidence_chunks
+
+
+def _chunk_text(value: str, size: int) -> list[str]:
+    if len(value) <= size:
+        return [value]
+    return [
+        value[index : index + size].strip()
+        for index in range(0, len(value), size)
+        if value[index : index + size].strip()
+    ]
 
 
 def _conditions_from_required_fields(

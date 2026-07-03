@@ -30,6 +30,18 @@ class RetrieverTest(unittest.TestCase):
 
         self.assertEqual(candidates, [])
 
+    def test_matches_gyeonggi_city_policy_without_treating_other_cities_as_match(self) -> None:
+        policies = [
+            _policy("seongnam", ["성남시"]),
+            _policy("uijeongbu", ["의정부시"]),
+            _policy("gyeonggi", ["경기도"]),
+        ]
+        profile = UserProfile(age=26, region="경기도 의정부", employment_status="unemployed")
+
+        candidates = retrieve_policies(profile, policies)
+
+        self.assertEqual([policy.id for policy in candidates], ["uijeongbu", "gyeonggi"])
+
     def test_filters_region_candidates_by_intent_when_possible(self) -> None:
         policies = [
             _policy("housing", ["전국"], name="청년월세지원"),

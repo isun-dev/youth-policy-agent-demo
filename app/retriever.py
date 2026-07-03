@@ -75,10 +75,26 @@ def retrieve_policies(
 
 
 def _matches_region(user_region: str, policy_regions: list[str]) -> bool:
-    return any(
-        region in user_region or user_region in region
-        for region in policy_regions
-    )
+    user_aliases = _region_aliases(user_region)
+    for region in policy_regions:
+        policy_aliases = _region_aliases(region)
+        if user_aliases & policy_aliases:
+            return True
+        if region in user_region or user_region in region:
+            return True
+    return False
+
+
+def _region_aliases(value: str) -> set[str]:
+    aliases = {value.strip()}
+    for token in value.replace(",", " ").split():
+        cleaned = token.strip()
+        if not cleaned:
+            continue
+        aliases.add(cleaned)
+        if cleaned[-1:] in {"시", "군", "구"} and len(cleaned) > 1:
+            aliases.add(cleaned[:-1])
+    return aliases
 
 
 def _apply_intent_filter(policies: list[Policy], intent: UserIntent | None) -> list[Policy]:

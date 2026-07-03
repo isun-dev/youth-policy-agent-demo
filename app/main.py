@@ -7,7 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
-from app.agent import run_agent, run_agent_from_youthcenter_api
+from app.agent import run_agent, run_agent_from_gyeonggi_api, run_agent_from_youthcenter_api
 from app.input_parser import build_profile_from_cli
 from app.natural_language_parser import parse_natural_language_input
 from app.schemas import UserIntent, UserProfile
@@ -20,21 +20,32 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="경기도 청년 정책 지원 자격 판정 CLI")
     parser.add_argument(
         "--source",
-        choices=["sample", "api"],
+        choices=["sample", "api", "youthcenter", "gyeonggi"],
         default="sample",
-        help="정책 데이터 출처를 선택합니다. 기본값은 sample입니다.",
+        help="정책 데이터 출처를 선택합니다. api는 youthcenter와 같습니다. 기본값은 sample입니다.",
     )
     parser.add_argument(
         "--page-size",
         type=int,
         default=20,
-        help="API에서 가져올 정책 수입니다. --source api에서만 사용합니다.",
+        help="API에서 페이지당 가져올 정책 수입니다. API 출처에서 사용합니다.",
     )
     parser.add_argument(
         "--pages",
         type=int,
         default=5,
-        help="API에서 가져올 페이지 수입니다. --source api에서만 사용합니다.",
+        help="API에서 가져올 페이지 수입니다. API 출처에서 사용합니다.",
+    )
+    parser.add_argument(
+        "--skip-details",
+        action="store_true",
+        help="경기도 API 사용 시 상세 페이지 HTML 근거 수집을 건너뜁니다.",
+    )
+    parser.add_argument(
+        "--detail-limit",
+        type=int,
+        default=10,
+        help="경기도 API 사용 시 상세 페이지를 가져올 최대 정책 수입니다.",
     )
     parser.add_argument(
         "--slot-fill",
@@ -54,13 +65,23 @@ def main() -> None:
 
     profile, intent = _build_profile_and_intent(args.text, use_llm=args.use_llm)
 
-    if args.source == "api":
+    if args.source in {"api", "youthcenter"}:
         answer = run_agent_from_youthcenter_api(
             profile,
             page_size=args.page_size,
             pages=args.pages,
             slot_fill=args.slot_fill,
             intent=intent,
+        )
+    elif args.source == "gyeonggi":
+        answer = run_agent_from_gyeonggi_api(
+            profile,
+            page_size=args.page_size,
+            pages=args.pages,
+            slot_fill=args.slot_fill,
+            intent=intent,
+            fetch_details=not args.skip_details,
+            detail_limit=args.detail_limit,
         )
     else:
         answer = run_agent(profile, POLICY_PATH, slot_fill=args.slot_fill, intent=intent)
