@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.policy_detail_tool import PolicyDetailTool, PolicyDetailToolError
-from app.policy_normalizer import enrich_policy_with_detail_text
 from app.schemas import Policy
 
 
@@ -38,6 +37,12 @@ def enrich_policies_with_detail_pages(
             continue
 
         if detail.fetch_status != "ok":
+            enriched_policies.append(policy)
+            continue
+
+        try:
+            from app.policy_normalizer import enrich_policy_with_detail_text
+        except ImportError:
             enriched_policies.append(policy)
             continue
 
